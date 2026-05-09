@@ -1,55 +1,158 @@
-import asyncio
-import json
-import os
-from aiohttp import web, WSCloseCode
+import SwiftUI
+import MultipeerConnectivity
 
-# Настройки
-VERSION = "6.6"
-IPA_NAME = "Messenger.ipa"
-BUNDLE_ID = "com.hq.globalmesh"
+@main
+struct MessengerApp: App {
+    var body: some Scene {
+        WindowGroup { MainCoordinator() }
+    }
+}
 
-async def handle_manifest(request):
-    host = request.host
-    manifest = f"""<?xml version="1.0" encoding="UTF-8"?>
-    <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-    <plist version="1.0"><dict><key>items</key><array><dict><key>assets</key><array><dict>
-    <key>kind</key><string>software-package</string><key>url</key><string>https://{host}/download/ipa</string>
-    </dict></array><key>metadata</key><dict><key>bundle-identifier</key><string>{BUNDLE_ID}</string>
-    <key>bundle-version</key><string>{VERSION}</string><key>kind</key><string>software</string>
-    <key>title</key><string>HQ Global</string></dict></dict></array></dict></plist>"""
-    return web.Response(text=manifest, content_type='text/xml')
+struct AppConfig {
+    static let host = "elevation-strength-authentic.ngrok-free.dev"
+    static let version = "6.6"
+}
 
-async def handle_ipa(request):
-    if os.path.exists(IPA_NAME):
-        return web.FileResponse(IPA_NAME)
-    return web.Response(text="IPA not found", status=404)
+struct Message: Identifiable, Codable, Hashable {
+    let id: UUID
+    let text: String
+    let senderID: String
+    let isMe: Bool
+}
 
-clients = set()
+struct ServerPacket: Codable {
+    let type: String
+    let version: String?
+    let payload: [Message]?
+}
 
-async def websocket_handler(request):
-    ws = web.WebSocketResponse()
-    await ws.prepare(request)
-    clients.add(ws)
+class GlobalCore: NSObject, ObservableObject, MCSessionDelegate, MCNearbyServiceAdvertiserDelegate, MCNearbyServiceBrowserDelegate {
+    @Published var messages: [Message] = []
+    @Published var peers = 0
+    @Published var isOnline = false
+    @Published var showUpdate = false
+    @Published var serverV = ""
+    @Published var name = UserDefaults.standard.string(forKey: "u_name") ?? ""
     
-    # Сразу шлем проверку версии
-    await ws.send_str(json.dumps({"type": "version_check", "version": VERSION}))
-    
-    try:
-        async for msg in ws:
-            if msg.type == web.WSMsgType.TEXT:
-                data = json.loads(msg.data)
-                # Рассылаем всем
-                for client in clients:
-                    await client.send_str(json.dumps({"type": "msg", "payload": [data]}))
-    finally:
-        clients.remove(ws)
-    return ws
+    var session: MCSession!
+    var ws: URLSessionWebSocketTask?
 
-app = web.Application()
-app.router.add_get('/manifest.plist', handle_manifest)
-app.router.add_get('/download/ipa', handle_ipa)
-app.router.add_get('/ws', websocket_handler)
+    func setup(userName: String) {
+        self.name = userName
+        UserDefaults.standard.set(userName, forKey: "u_name")
+        let pid = MCPeerID(displayName: userName)
+        session = MCSession(peer: pid, securityIdentity: nil, encryptionPreference: .none)
+        session.delegate = self
+        
+        let adv = MCNearbyServiceAdvertiser(peer: pid, discoveryInfo: nil, serviceType: "hq-mesh")
+        adv.delegate = self
+        adv.startAdvertisingPeer()
+        
+        let browser = MCNearbyServiceBrowser(peer: pid, serviceType: "hq-mesh")
+        browser.delegate = self
+        browser.startBrowsingForPeers()
+        
+        connect()
+    }
 
-if __name__ == "__main__":
-    print(f"🚀 HQ Ultimate Server v{VERSION} запущен!")
-    web.run_app(app, port=80)
+    func connect() {
+        guard let url = URL(string: "wss://\(AppConfig.host)/ws") else { return }
+        ws = URLSession.shared.webSocketTask(with: url)
+        ws?.resume()
+        listen()
+    }
+
+    func listen() {
+        ws?.receive { [weak self] res in
+            guard let self = self, case .success(let msg) = res, case .string(let str) = msg,
+                  let data = str.data(using: .utf8),
+                  let packet = try? JSONDecoder().decode(ServerPacket.self, from: data) else {
+                self?.listen()
+                return
+            }
+            
+            DispatchQueue.main.async {
+                if packet.type == "version_check", let v = packet.version, v != AppConfig.version {
+                    self.serverV = v
+                    self.showUpdate = true
+                } else if packet.type == "msg", let p = packet.payload {
+                    self.messages.append(contentsOf: p.filter { m in !self.messages.contains(where: { $0.id == m.id }) })
+                }
+            }
+            self.listen()
+        }
+    }
+
+    func update() {
+        let url = "itms-services://?action=download-manifest&url=https://\(AppConfig.host)/manifest.plist"
+        if let u = URL(string: url) { UIApplication.shared.open(u) }
+    }
+
+    func send(_ txt: String) {
+        let m = Message(id: UUID(), text: txt, senderID: name, isMe: true)
+        messages.append(m)
+        if let d = try? JSONEncoder().encode(m) {
+            try? session.send(d, toPeers: session.connectedPeers, with: .reliable)
+            ws?.send(.string(String(data: d, encoding: .utf8) ?? "")) { _ in }
+        }
+    }
+
+    // Mesh
+    func session(_ s: MCSession, didReceive d: Data, fromPeer id: MCPeerID) {
+        if let m = try? JSONDecoder().decode(Message.self, from: d) {
+            DispatchQueue.main.async { self.messages.append(Message(id: m.id, text: m.text, senderID: m.senderID, isMe: false)) }
+        }
+    }
+    func session(_ s: MCSession, peer id: MCPeerID, didChange st: MCSessionState) { DispatchQueue.main.async { self.peers = s.connectedPeers.count; self.isOnline = (st == .connected) } }
+    func advertiser(_ a: MCNearbyServiceAdvertiser, didReceiveInvitationFromPeer id: MCPeerID, withContext c: Data?, invitationHandler: @escaping (Bool, MCSession?) -> Void) { invitationHandler(true, session) }
+    func browser(_ b: MCNearbyServiceBrowser, foundPeer id: MCPeerID, withDiscoveryInfo i: [String : String]?) { b.invitePeer(id, to: session, withContext: nil, timeout: 10) }
+    func browser(_ b: MCNearbyServiceBrowser, lostPeer id: MCPeerID) {}
+    func session(_ s: MCSession, didReceive stream: InputStream, withName n: String, fromPeer id: MCPeerID) {}
+    func session(_ s: MCSession, didStartReceivingResourceWithName n: String, fromPeer id: MCPeerID, with p: Progress) {}
+    func session(_ s: MCSession, didFinishReceivingResourceWithName n: String, fromPeer id: MCPeerID, at l: URL?, withError e: Error?) {}
+}
+
+struct MainCoordinator: View {
+    @StateObject var core = GlobalCore()
+    var body: some View {
+        NavigationView {
+            if core.name.isEmpty {
+                VStack {
+                    TextField("Ник", text: $core.name).textFieldStyle(.roundedBorder).padding()
+                    Button("Войти") { core.setup(userName: core.name) }.buttonStyle(.borderedProminent)
+                }
+            } else {
+                VStack {
+                    HStack {
+                        Circle().fill(core.isOnline ? Color.blue : Color.red).frame(width: 10, height: 10)
+                        Text(core.isOnline ? "Cloud" : "Mesh").font(.caption)
+                        Spacer()
+                        Text("Узлов: \(core.peers)").font(.caption)
+                    }.padding()
+                    
+                    ScrollView {
+                        VStack {
+                            ForEach(core.messages) { m in
+                                HStack {
+                                    if m.isMe { Spacer() }
+                                    Text(m.text).padding(10).background(m.isMe ? Color.blue : Color.gray.opacity(0.2)).cornerRadius(12).foregroundColor(m.isMe ? .white : .primary)
+                                    if !m.isMe { Spacer() }
+                                }
+                            }
+                        }.padding()
+                    }
+                    
+                    HStack {
+                        TextField("Сообщение...", text: $core.serverV).padding() // Используем поле для текста
+                        Button("🚀") { core.send(core.serverV); core.serverV = "" }
+                    }.padding()
+                }
+                .navigationTitle("HQ Mesh")
+                .alert("Обнова v\(core.serverV)", isPresented: $core.showUpdate) {
+                    Button("Ставим!") { core.update() }
+                    Button("Отмена", role: .cancel) {}
+                }
+            }
+        }.onAppear { if !core.name.isEmpty { core.setup(userName: core.name) } }
+    }
+}
