@@ -8,55 +8,57 @@ struct MessengerApp: App {
     }
 }
 
+// MARK: - НАСТРОЙКИ СВЯЗИ
+struct AppConfig {
+    // ЗАМЕНИ НА СВОЙ ВНЕШНИЙ IP ИЛИ АДРЕС NGROK ДЛЯ СВЯЗИ НА РАССТОЯНИИ
+    static let serverURL = "ws://192.168.0.55:8080" 
+}
+
 // MARK: - МОДЕЛЬ СООБЩЕНИЯ
 struct Message: Identifiable, Codable, Hashable {
     let id: UUID
     let text: String
     let senderID: String
-    let recipientID: String? // nil для общего чата
+    let recipientID: String?
     let isMe: Bool
     let viaServer: Bool
 }
 
-// MARK: - ГИБРИДНОЕ ЯДРО (Mesh + Server)
-class HybridCore: NSObject, ObservableObject, MCSessionDelegate, MCNearbyServiceAdvertiserDelegate, MCNearbyServiceBrowserDelegate {
+// MARK: - ЯДРО СИСТЕМЫ
+class GlobalCore: NSObject, ObservableObject, MCSessionDelegate, MCNearbyServiceAdvertiserDelegate, MCNearbyServiceBrowserDelegate {
     @Published var groupMessages: [Message] = []
-    @Published var privateMessages: [String: [Message]] = [:] // Ник : [Сообщения]
+    @Published var privateMessages: [String: [Message]] = [:]
     @Published var peers: [MCPeerID] = []
     @Published var myName: String = UserDefaults.standard.string(forKey: "user_name") ?? ""
     @Published var isServerConnected: Bool = false
     
-    // Mesh
     var session: MCSession!
     var advertiser: MCNearbyServiceAdvertiser!
     var browser: MCNearbyServiceBrowser!
     var myPeerID: MCPeerID!
-    
-    // Server
     var webSocketTask: URLSessionWebSocketTask?
 
-    func startSystem(name: String) {
+    func start(name: String) {
         self.myName = name
         UserDefaults.standard.set(name, forKey: "user_name")
         
-        // 1. Старт Mesh
         myPeerID = MCPeerID(displayName: name)
         session = MCSession(peer: myPeerID, securityIdentity: nil, encryptionPreference: .none)
         session.delegate = self
+        
         advertiser = MCNearbyServiceAdvertiser(peer: myPeerID, discoveryInfo: nil, serviceType: "hq-mesh")
         advertiser.delegate = self
         advertiser.startAdvertisingPeer()
+        
         browser = MCNearbyServiceBrowser(peer: myPeerID, serviceType: "hq-mesh")
         browser.delegate = self
         browser.startBrowsingForPeers()
         
-        // 2. Старт Сервера (Твой Ryzen)
         connectToServer()
     }
 
     func connectToServer() {
-        // ВШИТ ТВОЙ ЛОКАЛЬНЫЙ IP ИЗ КОНСОЛИ
-        guard let url = URL(string: "ws://192.168.0.55:8080") else { return }
+        guard let url = URL(string: AppConfig.serverURL) else { return }
         let request = URLRequest(url: url)
         webSocketTask = URLSession.shared.webSocketTask(with: request)
         webSocketTask?.resume()
@@ -70,25 +72,19 @@ class HybridCore: NSObject, ObservableObject, MCSessionDelegate, MCNearbyService
     func send(text: String, to recipient: MCPeerID? = nil) {
         let msg = Message(id: UUID(), text: text, senderID: myName, recipientID: recipient?.displayName, isMe: true, viaServer: false)
         
-        // Отрисовка у себя
         DispatchQueue.main.async {
             withAnimation {
-                if let target = recipient?.displayName {
-                    self.privateMessages[target, default: []].append(msg)
-                } else {
-                    self.groupMessages.append(msg)
-                }
+                if let target = recipient?.displayName { self.privateMessages[target, default: []].append(msg) }
+                else { self.groupMessages.append(msg) }
             }
         }
 
         if let data = try? JSONEncoder().encode(msg) {
-            // Отправка по Mesh
+            // Mesh
             let targets = recipient != nil ? [recipient!] : session.connectedPeers
-            if !targets.isEmpty {
-                try? session.send(data, toPeers: targets, with: .reliable)
-            }
+            if !targets.isEmpty { try? session.send(data, toPeers: targets, with: .reliable) }
             
-            // Отправка на Сервер
+            // Server (Distanced communication)
             if isServerConnected {
                 let stringData = String(data: data, encoding: .utf8) ?? ""
                 webSocketTask?.send(.string(stringData)) { _ in }
@@ -99,43 +95,31 @@ class HybridCore: NSObject, ObservableObject, MCSessionDelegate, MCNearbyService
     func receiveFromServer() {
         webSocketTask?.receive { [weak self] result in
             guard let self = self else { return }
-            switch result {
-            case .success(let message):
-                if case .string(let text) = message,
-                   let data = text.data(using: .utf8),
-                   let msg = try? JSONDecoder().decode(Message.self, from: data),
-                   msg.senderID != self.myName {
-                    
-                    DispatchQueue.main.async {
-                        withAnimation {
-                            let receivedMsg = Message(id: msg.id, text: msg.text, senderID: msg.senderID, recipientID: msg.recipientID, isMe: false, viaServer: true)
-                            
-                            if msg.recipientID == nil {
-                                self.groupMessages.append(receivedMsg)
-                            } else if msg.recipientID == self.myName {
-                                self.privateMessages[msg.senderID, default: []].append(receivedMsg)
-                            }
-                        }
+            if case .success(let message) = result, case .string(let text) = message,
+               let data = text.data(using: .utf8),
+               let msg = try? JSONDecoder().decode(Message.self, from: data),
+               msg.senderID != self.myName {
+                
+                DispatchQueue.main.async {
+                    withAnimation {
+                        let receivedMsg = Message(id: msg.id, text: msg.text, senderID: msg.senderID, recipientID: msg.recipientID, isMe: false, viaServer: true)
+                        if msg.recipientID == nil { self.groupMessages.append(receivedMsg) }
+                        else if msg.recipientID == self.myName { self.privateMessages[msg.senderID, default: []].append(receivedMsg) }
                     }
                 }
-            case .failure(_):
-                DispatchQueue.main.async { self.isServerConnected = false }
             }
             self.receiveFromServer()
         }
     }
 
-    func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
+    // Mesh Handlers
+    func session(_ session: MCSession, didReceive data: Data, fromPeer id: MCPeerID) {
         if let msg = try? JSONDecoder().decode(Message.self, from: data) {
             DispatchQueue.main.async {
                 withAnimation {
                     let receivedMsg = Message(id: msg.id, text: msg.text, senderID: msg.senderID, recipientID: msg.recipientID, isMe: false, viaServer: false)
-                    
-                    if msg.recipientID == nil {
-                        self.groupMessages.append(receivedMsg)
-                    } else if msg.recipientID == self.myName {
-                        self.privateMessages[msg.senderID, default: []].append(receivedMsg)
-                    }
+                    if msg.recipientID == nil { self.groupMessages.append(receivedMsg) }
+                    else if msg.recipientID == self.myName { self.privateMessages[msg.senderID, default: []].append(receivedMsg) }
                 }
             }
         }
@@ -145,35 +129,30 @@ class HybridCore: NSObject, ObservableObject, MCSessionDelegate, MCNearbyService
         DispatchQueue.main.async { self.peers = session.connectedPeers }
     }
     
-    // Заглушки
-    func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didReceiveInvitationFromPeer id: MCPeerID, withContext c: Data?, invitationHandler: @escaping (Bool, MCSession?) -> Void) { invitationHandler(true, session) }
-    func browser(_ browser: MCNearbyServiceBrowser, foundPeer id: MCPeerID, withDiscoveryInfo i: [String : String]?) { browser.invitePeer(id, to: session, withContext: nil, timeout: 10) }
-    func browser(_ browser: MCNearbyServiceBrowser, lostPeer id: MCPeerID) {}
-    func session(_ session: MCSession, didReceive stream: InputStream, withName n: String, fromPeer id: MCPeerID) {}
-    func session(_ session: MCSession, didStartReceivingResourceWithName n: String, fromPeer id: MCPeerID, with p: Progress) {}
-    func session(_ session: MCSession, didFinishReceivingResourceWithName n: String, fromPeer id: MCPeerID, at l: URL?, withError e: Error?) {}
+    func advertiser(_ a: MCNearbyServiceAdvertiser, didReceiveInvitationFromPeer id: MCPeerID, withContext c: Data?, invitationHandler: @escaping (Bool, MCSession?) -> Void) { invitationHandler(true, session) }
+    func browser(_ b: MCNearbyServiceBrowser, foundPeer id: MCPeerID, withDiscoveryInfo i: [String : String]?) { b.invitePeer(id, to: session, withContext: nil, timeout: 10) }
+    func browser(_ b: MCNearbyServiceBrowser, lostPeer id: MCPeerID) {}
+    func session(_ s: MCSession, didReceive stream: InputStream, withName n: String, fromPeer id: MCPeerID) {}
+    func session(_ s: MCSession, didStartReceivingResourceWithName n: String, fromPeer id: MCPeerID, with p: Progress) {}
+    func session(_ s: MCSession, didFinishReceivingResourceWithName n: String, fromPeer id: MCPeerID, at l: URL?, withError e: Error?) {}
 }
 
-// MARK: - ИНТЕРФЕЙС
+// MARK: - UI
 struct MainCoordinator: View {
-    @StateObject var core = HybridCore()
+    @StateObject var core = GlobalCore()
     var body: some View {
         if core.myName.isEmpty { RegistrationView(core: core) }
         else {
             TabView {
-                GroupChatView(core: core)
-                    .tabItem { Label("Группа", systemImage: "person.3.fill") }
-                
-                PeersListView(core: core)
-                    .tabItem { Label("Личные", systemImage: "person.fill") }
-            }
-            .onAppear { core.startSystem(name: core.myName) }
+                GroupChatView(core: core).tabItem { Label("Группа", systemImage: "person.3.fill") }
+                PeersListView(core: core).tabItem { Label("Личные", systemImage: "person.fill") }
+            }.onAppear { core.start(name: core.myName) }
         }
     }
 }
 
 struct GroupChatView: View {
-    @ObservedObject var core: HybridCore
+    @ObservedObject var core: GlobalCore
     @State var text = ""
     var body: some View {
         NavigationView {
@@ -181,15 +160,13 @@ struct GroupChatView: View {
                 StatusBar(core: core)
                 ChatBubbleList(messages: core.groupMessages)
                 MessageInput(text: $text) { core.send(text: text) }
-            }
-            .navigationTitle("Общий канал")
-            .navigationBarTitleDisplayMode(.inline)
+            }.navigationTitle("HQ Global").navigationBarTitleDisplayMode(.inline)
         }
     }
 }
 
 struct PeersListView: View {
-    @ObservedObject var core: HybridCore
+    @ObservedObject var core: GlobalCore
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
@@ -202,31 +179,26 @@ struct PeersListView: View {
                             Text(peer.displayName).font(.headline)
                         }
                     }
-                }
-                .overlay(Group { if core.peers.isEmpty { Text("Рядом никого нет...").foregroundColor(.gray) } })
-            }
-            .navigationTitle("Контакты")
-            .navigationBarTitleDisplayMode(.inline)
+                }.overlay(Group { if core.peers.isEmpty { Text("Рядом никого нет...").foregroundColor(.gray) } })
+            }.navigationTitle("Контакты").navigationBarTitleDisplayMode(.inline)
         }
     }
 }
 
 struct PrivateChatView: View {
-    @ObservedObject var core: HybridCore
+    @ObservedObject var core: GlobalCore
     let peer: MCPeerID
     @State var text = ""
     var body: some View {
         VStack {
             ChatBubbleList(messages: core.privateMessages[peer.displayName] ?? [])
             MessageInput(text: $text) { core.send(text: text, to: peer) }
-        }
-        .navigationTitle(peer.displayName)
-        .navigationBarTitleDisplayMode(.inline)
+        }.navigationTitle(peer.displayName).navigationBarTitleDisplayMode(.inline)
     }
 }
 
 struct StatusBar: View {
-    @ObservedObject var core: HybridCore
+    @ObservedObject var core: GlobalCore
     var body: some View {
         HStack {
             HStack {
@@ -257,8 +229,7 @@ struct ChatBubbleList: View {
                                     Image(systemName: msg.viaServer ? "cloud.fill" : "wave.3.left").font(.system(size: 8)).foregroundColor(.gray)
                                 }
                             }
-                            Text(msg.text)
-                                .padding(12).background(msg.isMe ? Color.blue : Color(UIColor.secondarySystemBackground))
+                            Text(msg.text).padding(12).background(msg.isMe ? Color.blue : Color(UIColor.secondarySystemBackground))
                                 .foregroundColor(msg.isMe ? .white : .primary).cornerRadius(18)
                         }
                         if !msg.isMe { Spacer() }
@@ -275,17 +246,20 @@ struct MessageInput: View {
     var body: some View {
         HStack {
             TextField("Сообщение...", text: $text).padding(10).background(Color.gray.opacity(0.1)).cornerRadius(20)
-            Button(action: { onSend(); text = "" }) {
-                Image(systemName: "arrow.up.circle.fill").font(.title).foregroundColor(.blue)
-            }.disabled(text.isEmpty)
+            Button(action: { onSend(); text = "" }) { Image(systemName: "arrow.up.circle.fill").font(.title).foregroundColor(.blue) }.disabled(text.isEmpty)
         }.padding()
     }
 }
 
 struct RegistrationView: View {
-    @ObservedObject var core: HybridCore
+    @ObservedObject var core: GlobalCore
     @State var name = ""
     var body: some View {
         VStack(spacing: 30) {
             Text("🛰").font(.system(size: 80))
-            Text("HQ Global").font(.largeTitle).
+            Text("HQ Global").font(.largeTitle).bold()
+            TextField("Твой ник", text: $name).padding().background(Color.gray.opacity(0.1)).cornerRadius(12).padding(.horizontal)
+            Button("Войти") { if !name.isEmpty { core.start(name: name) } }.buttonStyle(.borderedProminent)
+        }.edgesIgnoringSafeArea(.all)
+    }
+}
