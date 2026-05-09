@@ -8,38 +8,24 @@ struct MessengerApp: App {
     var body: some Scene { WindowGroup { MainCoordinator() } }
 }
 
-// MARK: - МОДЕЛИ
-enum MsgType: String, Codable { case text, image, video, circle, voice }
+enum MsgType: String, Codable { case text, image, video, voice }
 
 struct Message: Identifiable, Codable, Hashable {
-    let id: UUID
-    let text: String
-    let senderID: String
-    let type: MsgType
-    let url: String?
-    let isMe: Bool
+    let id: UUID; let text: String; let senderID: String; let type: MsgType; let url: String?; let isMe: Bool
 }
 
-struct IdentifiableString: Identifiable { let id: String }
-
-// MARK: - ГЛОБАЛЬНОЕ ЯДРО
 class GlobalCore: NSObject, ObservableObject, MCSessionDelegate, MCNearbyServiceAdvertiserDelegate, MCNearbyServiceBrowserDelegate {
-    @Published var groupMessages: [Message] = []
-    @Published var contacts: [String] = []
+    @Published var messages: [Message] = []
     @Published var name = UserDefaults.standard.string(forKey: "u_name") ?? ""
     @Published var isOnline = false
-    @Published var peersCount = 0
     @Published var incomingCall: String? = nil
     @Published var showUpdate = false
-    @Published var newVersion = ""
+    @Published var isRecording = false
     
-    let currentAppVersion = "9.0"
-    let host = "elevation-strength-authentic.ngrok-free.dev" // ТВОЙ АДРЕС NGROK
-    
+    let host = "elevation-strength-authentic.ngrok-free.dev"
     var ws: URLSessionWebSocketTask?
     var session: MCSession!
-    var advertiser: MCNearbyServiceAdvertiser!
-    var browser: MCNearbyServiceBrowser!
+    var recorder: AVAudioRecorder?
 
     func setup(n: String) {
         self.name = n
@@ -47,15 +33,8 @@ class GlobalCore: NSObject, ObservableObject, MCSessionDelegate, MCNearbyService
         let pid = MCPeerID(displayName: n)
         session = MCSession(peer: pid, securityIdentity: nil, encryptionPreference: .none)
         session.delegate = self
-        
-        advertiser = MCNearbyServiceAdvertiser(peer: pid, discoveryInfo: nil, serviceType: "hq-mesh")
-        advertiser.delegate = self
-        advertiser.startAdvertisingPeer()
-        
-        browser = MCNearbyServiceBrowser(peer: pid, serviceType: "hq-mesh")
-        browser.delegate = self
-        browser.startBrowsingForPeers()
-        
+        MCNearbyServiceAdvertiser(peer: pid, discoveryInfo: nil, serviceType: "hq-mesh").startAdvertisingPeer()
+        MCNearbyServiceBrowser(peer: pid, serviceType: "hq-mesh").startBrowsingForPeers()
         connect()
     }
 
@@ -63,11 +42,7 @@ class GlobalCore: NSObject, ObservableObject, MCSessionDelegate, MCNearbyService
         guard let url = URL(string: "wss://\(host)/ws") else { return }
         ws = URLSession.shared.webSocketTask(with: url)
         ws?.resume()
-        
-        let reg = ["type": "register", "name": name]
-        if let d = try? JSONSerialization.data(withJSONObject: reg) {
-            ws?.send(.string(String(data: d, encoding: .utf8)!)) { _ in }
-        }
+        sendPacket(["type": "register", "name": name])
         listen()
     }
 
@@ -75,78 +50,67 @@ class GlobalCore: NSObject, ObservableObject, MCSessionDelegate, MCNearbyService
         ws?.receive { [weak self] res in
             guard let self = self, case .success(let msg) = res, case .string(let str) = msg,
                   let data = str.data(using: .utf8),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { self?.listen(); return }
+                  let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { self?.listen(); return }
             
             DispatchQueue.main.async {
-                let type = json["type"] as? String ?? ""
-                if type == "version_check", let v = json["version"] as? String, v != self.currentAppVersion {
-                    self.newVersion = v
-                    self.showUpdate = true
-                }
-                
-                let from = json["senderID"] as? String ?? ""
-                if from == self.name { self.listen(); return }
-
-                if type == "msg" {
-                    let m = Message(id: UUID(uuidString: json["id"] as? String ?? "") ?? UUID(),
-                                    text: json["text"] as? String ?? "",
-                                    senderID: from,
-                                    type: MsgType(rawValue: json["msgType"] as? String ?? "text") ?? .text,
-                                    url: json["url"] as? String,
-                                    isMe: false)
-                    if !self.groupMessages.contains(where: { $0.id == m.id }) { self.groupMessages.append(m) }
-                } else if type == "offer" {
-                    self.incomingCall = from
+                let t = j["type"] as? String ?? ""
+                if t == "version_check" { self.showUpdate = true }
+                else if t == "msg", let sID = j["senderID"] as? String, sID != self.name {
+                    let m = Message(id: UUID(), text: j["text"] as? String ?? "", senderID: sID, type: MsgType(rawValue: j["msgType"] as? String ?? "text") ?? .text, url: j["url"] as? String, isMe: false)
+                    if !self.messages.contains(where: { $0.text == m.text && $0.senderID == m.senderID }) { self.messages.append(m) }
+                } else if t == "offer", (j["target"] as? String) == self.name {
+                    self.incomingCall = j["from"] as? String
                 }
             }
             self.listen()
         }
     }
 
-    func send(txt: String = "", type: MsgType = .text, media: String? = nil) {
-        let mID = UUID()
-        let m = Message(id: mID, text: txt, senderID: name, type: type, url: media, isMe: true)
-        groupMessages.append(m)
-        
-        let packet: [String: Any] = ["type": "msg", "id": mID.uuidString, "senderID": name, "text": txt, "msgType": type.rawValue, "url": media ?? ""]
-        if let d = try? JSONSerialization.data(withJSONObject: packet) {
-            ws?.send(.string(String(data: d, encoding: .utf8)!)) { _ in }
-            try? session.send(d, toPeers: session.connectedPeers, with: .reliable)
-        }
+    func sendPacket(_ p: [String: Any]) {
+        if let d = try? JSONSerialization.data(withJSONObject: p) { ws?.send(.string(String(data: d, encoding: .utf8)!)) { _ in } }
+    }
+
+    func send(txt: String = "", type: MsgType = .text, url: String? = nil) {
+        let m = Message(id: UUID(), text: txt, senderID: name, type: type, url: url, isMe: true)
+        messages.append(m)
+        let p: [String: Any] = ["type": "msg", "senderID": name, "text": txt, "msgType": type.rawValue, "url": url ?? ""]
+        sendPacket(p)
+        if let d = try? JSONSerialization.data(withJSONObject: p) { try? session.send(d, toPeers: session.connectedPeers, with: .reliable) }
     }
 
     func upload(data: Data, ext: String, type: MsgType) {
         let url = URL(string: "https://\(host)/upload")!
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
+        var req = URLRequest(url: url); req.httpMethod = "POST"
         let b = UUID().uuidString
         req.setValue("multipart/form-data; boundary=\(b)", forHTTPHeaderField: "Content-Type")
         var body = Data()
         body.append("--\(b)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(UUID().uuidString).\(ext)\"\r\n\r\n".data(using: .utf8)!)
-        body.append(data)
-        body.append("\r\n--\(b)--\r\n".data(using: .utf8)!)
-        URLSession.shared.uploadTask(with: req, from: body) { data, _, _ in
-            if let data = data, let res = try? JSONDecoder().decode([String: String].self, from: data), let fileUrl = res["url"] {
-                DispatchQueue.main.async { self.send(type: type, media: fileUrl) }
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"file.\(ext)\"\r\n\r\n".data(using: .utf8)!)
+        body.append(data); body.append("\r\n--\(b)--\r\n".data(using: .utf8)!)
+        URLSession.shared.uploadTask(with: req, from: body) { d, _, _ in
+            if let d = d, let res = try? JSONDecoder().decode([String: String].self, from: d) {
+                DispatchQueue.main.async { self.send(type: type, url: res["url"]) }
             }
         }.resume()
     }
 
-    // MESH LOGIC
-    func session(_ s: MCSession, peer id: MCPeerID, didChange st: MCSessionState) { 
-        DispatchQueue.main.async { 
-            self.peersCount = s.connectedPeers.count
-            self.isOnline = (st == .connected)
-            if st == .connected && !self.contacts.contains(id.displayName) { self.contacts.append(id.displayName) }
-        } 
+    // Voice Recording
+    func startRecord() {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("rec.m4a")
+        let settings = [AVFormatIDKey: Int(kAudioFormatMPEG4AAC), AVSampleRateKey: 12000, AVNumberOfChannelsKey: 1, AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue]
+        recorder = try? AVAudioRecorder(url: url, settings: settings)
+        recorder?.record(); isRecording = true
     }
+    func stopRecord() {
+        recorder?.stop(); isRecording = false
+        if let url = recorder?.url, let data = try? Data(contentsOf: url) { upload(data: data, ext: "m4a", type: .voice) }
+    }
+
+    // Mesh Delegates
+    func session(_ s: MCSession, peer id: MCPeerID, didChange st: MCSessionState) { DispatchQueue.main.async { self.isOnline = (st == .connected) } }
     func session(_ s: MCSession, didReceive d: Data, fromPeer id: MCPeerID) {
-        if let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
-            DispatchQueue.main.async {
-                let m = Message(id: UUID(uuidString: j["id"] as? String ?? "") ?? UUID(), text: j["text"] as? String ?? "", senderID: j["senderID"] as? String ?? id.displayName, type: MsgType(rawValue: j["msgType"] as? String ?? "text") ?? .text, url: j["url"] as? String, isMe: false)
-                if !self.groupMessages.contains(where: { $0.id == m.id }) { self.groupMessages.append(m) }
-            }
+        if let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let sID = j["senderID"] as? String {
+            DispatchQueue.main.async { self.messages.append(Message(id: UUID(), text: j["text"] as? String ?? "", senderID: sID, type: .text, url: j["url"] as? String, isMe: false)) }
         }
     }
     func advertiser(_ a: MCNearbyServiceAdvertiser, didReceiveInvitationFromPeer id: MCPeerID, withContext c: Data?, invitationHandler: @escaping (Bool, MCSession?) -> Void) { invitationHandler(true, session) }
@@ -157,58 +121,42 @@ class GlobalCore: NSObject, ObservableObject, MCSessionDelegate, MCNearbyService
     func browser(_ b: MCNearbyServiceBrowser, lostPeer id: MCPeerID) {}
 }
 
-// MARK: - ИНТЕРФЕЙС
 struct MainCoordinator: View {
     @StateObject var core = GlobalCore()
     var body: some View {
         if core.name.isEmpty { RegistrationView(core: core) }
         else {
-            TabView {
-                GlobalChatView(core: core).tabItem { Label("Чат", systemImage: "bubble.left.and.bubble.right.fill") }
-                ContactsView(core: core).tabItem { Label("Mesh-Узлы", systemImage: "network") }
-            }
-            .alert("Доступна v\(core.newVersion)!", isPresented: $core.showUpdate) {
-                Button("Обновить по воздуху") {
-                    if let u = URL(string: "itms-services://?action=download-manifest&url=https://\(core.host)/manifest.plist") { UIApplication.shared.open(u) }
+            NavigationView {
+                VStack(spacing: 0) {
+                    ScrollViewReader { p in
+                        ScrollView {
+                            VStack(spacing: 12) { ForEach(core.messages) { m in Bubble(m: m).id(m.id) } }.padding()
+                        }.onChange(of: core.messages.count) { _ in p.scrollTo(core.messages.last?.id) }
+                    }
+                    InputBar(core: core)
                 }
-                Button("Позже", role: .cancel) {}
+                .navigationTitle("HQ Global").navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button(action: { core.sendPacket(["type":"offer","from":core.name,"target":"Papa"]) }) { Image(systemName: "video.fill") } } }
             }
-            .fullScreenCover(item: Binding(get: { core.incomingCall.map { IdentifiableString(id: $0) } }, set: { _ in core.incomingCall = nil })) { call in
-                CallView(name: call.id)
-            }
+            .fullScreenCover(item: Binding(get: { core.incomingCall.map { IdentifiableString(id: $0) } }, set: { _ in core.incomingCall = nil })) { c in CallView(name: c.id) }
         }
     }
 }
 
-struct GlobalChatView: View {
-    @ObservedObject var core: GlobalCore
-    @State var txt = ""
-    @State var picker: PhotosPickerItem?
+struct InputBar: View {
+    @ObservedObject var core: GlobalCore; @State var txt = ""; @State var pick: PhotosPickerItem?
     var body: some View {
-        NavigationView {
-            VStack(spacing: 0) {
-                HStack {
-                    Circle().fill(core.isOnline ? Color.blue : Color.red).frame(width: 8, height: 8)
-                    Text(core.isOnline ? "Cloud" : "Mesh Only").font(.caption)
-                    Spacer()
-                    Text("Узлов: \(core.peersCount)").font(.caption)
-                }.padding().background(Color(.secondarySystemBackground))
-                
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        VStack(spacing: 12) {
-                            ForEach(core.groupMessages) { m in Bubble(m: m).id(m.id) }
-                        }.padding()
-                    }.onChange(of: core.groupMessages.count) { _ in proxy.scrollTo(core.groupMessages.last?.id) }
-                }
-                HStack(spacing: 12) {
-                    PhotosPicker(selection: $picker, matching: .any(of: [.images, .videos])) { Image(systemName: "paperclip").font(.title2) }
-                    .onChange(of: picker) { n in Task { if let d = try? await n?.loadTransferable(type: Data.self) { core.upload(data: d, ext: "dat", type: .image) } } }
-                    TextField("Сообщение", text: $txt).padding(10).background(Color(.systemGray6)).cornerRadius(20)
-                    Button(action: { core.send(txt: txt); txt = "" }) { Image(systemName: "arrow.up.circle.fill").font(.system(size: 32)) }.disabled(txt.isEmpty)
-                }.padding()
-            }.navigationTitle("HQ Global").navigationBarTitleDisplayMode(.inline)
-        }
+        HStack(spacing: 12) {
+            PhotosPicker(selection: $pick, matching: .images) { Image(systemName: "plus").font(.title2) }
+            .onChange(of: pick) { n in Task { if let d = try? await n?.loadTransferable(type: Data.self) { core.upload(data: d, ext: "jpg", type: .image) } } }
+            TextField("Сообщение", text: $txt).padding(10).background(Color(.systemGray6)).cornerRadius(20)
+            if txt.isEmpty {
+                Button(action: {}) { Image(systemName: core.isRecording ? "stop.circle.fill" : "mic.fill").font(.title2).foregroundColor(core.isRecording ? .red : .blue) }
+                .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in if !core.isRecording { core.startRecord() } }.onEnded { _ in core.stopRecord() })
+            } else {
+                Button(action: { core.send(txt: txt); txt = "" }) { Image(systemName: "arrow.up.circle.fill").font(.system(size: 32)) }
+            }
+        }.padding()
     }
 }
 
@@ -218,47 +166,28 @@ struct Bubble: View {
         HStack {
             if m.isMe { Spacer() }
             VStack(alignment: m.isMe ? .trailing : .leading) {
-                Text(m.senderID).font(.caption2).foregroundColor(.gray)
-                if let u = m.url, m.type == .image {
-                    AsyncImage(url: URL(string: u)) { i in i.resizable().scaledToFit() } placeholder: { ProgressView() }.frame(width: 200).cornerRadius(12)
-                } else if let u = m.url, m.type == .video {
-                    VideoPlayer(player: AVPlayer(url: URL(string: u)!)).frame(width: 200, height: 200).cornerRadius(12)
-                } else {
-                    Text(m.text).padding(12).background(m.isMe ? Color.blue : Color(.systemGray5)).foregroundColor(m.isMe ? .white : .primary).cornerRadius(18)
-                }
+                if let u = m.url {
+                    if m.type == .image { AsyncImage(url: URL(string: u)) { i in i.resizable().scaledToFit() } placeholder: { ProgressView() }.frame(width: 200).cornerRadius(12) }
+                    else if m.type == .voice { HStack { Image(systemName: "play.fill"); Text("Голосовое сообщение") }.padding(10).background(Color.blue.opacity(0.1)).cornerRadius(12) }
+                } else { Text(m.text).padding(12).background(m.isMe ? Color.blue : Color(.systemGray5)).foregroundColor(m.isMe ? .white : .primary).cornerRadius(18) }
             }
             if !m.isMe { Spacer() }
         }
     }
 }
 
-struct ContactsView: View {
-    @ObservedObject var core: GlobalCore
-    var body: some View {
-        NavigationView {
-            List(core.contacts, id: \.self) { c in
-                HStack {
-                    Text(c); Spacer()
-                    Button(action: { core.incomingCall = c }) { Image(systemName: "video.fill") }
-                }
-            }.navigationTitle("Mesh-Узлы")
-        }
-    }
-}
-
 struct CallView: View {
-    let name: String
-    @Environment(\.dismiss) var dismiss
+    let name: String; @Environment(\.dismiss) var d
     var body: some View {
         ZStack {
             Color.black.edgesIgnoringSafeArea(.all)
             VStack {
-                Text("ВИДЕОЗВОНОК").foregroundColor(.gray)
+                Text("ВХОДЯЩИЙ ЗВОНОК").foregroundColor(.gray)
                 Text(name).font(.largeTitle).bold().foregroundColor(.white)
                 Spacer()
                 HStack(spacing: 60) {
-                    Button(action: { dismiss() }) { Circle().fill(.red).frame(width: 75).overlay(Image(systemName: "phone.down.fill").foregroundColor(.white)) }
-                    Button(action: { dismiss() }) { Circle().fill(.green).frame(width: 75).overlay(Image(systemName: "phone.fill").foregroundColor(.white)) }
+                    Button(action: { d() }) { Circle().fill(.red).frame(width: 75).overlay(Image(systemName: "phone.down.fill").foregroundColor(.white)) }
+                    Button(action: { d() }) { Circle().fill(.green).frame(width: 75).overlay(Image(systemName: "phone.fill").foregroundColor(.white)) }
                 }
             }.padding(.vertical, 100)
         }
@@ -266,8 +195,7 @@ struct CallView: View {
 }
 
 struct RegistrationView: View {
-    @ObservedObject var core: GlobalCore
-    @State var n = ""
+    @ObservedObject var core: GlobalCore; @State var n = ""
     var body: some View {
         VStack(spacing: 20) {
             Text("🛰").font(.system(size: 80))
@@ -276,3 +204,4 @@ struct RegistrationView: View {
         }
     }
 }
+struct IdentifiableString: Identifiable { let id: String }
