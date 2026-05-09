@@ -1,22 +1,14 @@
-// swift-tools-version: 6.1
+// swift-tools-version: 5.9
 import PackageDescription
 
 let package = Package(
     name: "Messenger",
-    platforms: [
-        .iOS(.v17) 
-    ],
-    products: [
-        .executable(
-            name: "Messenger",
-            targets: ["Messenger"]
-        )
-    ],
+    platforms: [.iOS(.v17)],
+    products: [.library(name: "Messenger", targets: ["Messenger"])],
     targets: [
-        .executableTarget(
+        .target(
             name: "Messenger",
             path: ".",
-            exclude: [".github"],
             sources: ["ContentView.swift"]
         )
     ]
