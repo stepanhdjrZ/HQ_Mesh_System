@@ -32,7 +32,7 @@ class MeshManager: NSObject, ObservableObject, MCSessionDelegate, MCNearbyServic
     func send(_ text: String) {
         if let data = text.data(using: .utf8) {
             try? session.send(data, toPeers: session.connectedPeers, with: .reliable)
-            messages.append("Вы: \(text)")
+            DispatchQueue.main.async { self.messages.append("Вы: \(text)") }
         }
     }
 
@@ -55,6 +55,7 @@ struct ContentView: View {
     @State var text = ""
     var body: some View {
         VStack {
+            Text("HQ Mesh System").font(.headline).padding()
             List(mesh.messages, id: \.self) { Text($0) }
             HStack {
                 TextField("Текст", text: $text).textFieldStyle(.roundedBorder)
