@@ -1,26 +1,38 @@
+import SwiftUI
+import MultipeerConnectivity
+
+@main
+struct MessengerApp: App {
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+        }
+    }
+}
+
 class MeshManager: NSObject, ObservableObject, MCSessionDelegate, MCNearbyServiceAdvertiserDelegate, MCNearbyServiceBrowserDelegate {
-    @Published var messages: [String] = ["Сеть готова"]
-    var peerID = MCPeerID(displayName: "User-\(Int.random(in: 100...999))")
+    @Published var messages: [String] = ["Связь установлена"]
     var session: MCSession!
     var advertiser: MCNearbyServiceAdvertiser!
     var browser: MCNearbyServiceBrowser!
+    let myPeerID = MCPeerID(displayName: "User-\(Int.random(in: 10...99))")
 
     override init() {
         super.init()
-        session = MCSession(peer: peerID, securityIdentity: nil, encryptionPreference: .none)
+        session = MCSession(peer: myPeerID, securityIdentity: nil, encryptionPreference: .none)
         session.delegate = self
-        advertiser = MCNearbyServiceAdvertiser(peer: peerID, discoveryInfo: nil, serviceType: "hq-mesh")
+        advertiser = MCNearbyServiceAdvertiser(peer: myPeerID, discoveryInfo: nil, serviceType: "hq-mesh")
         advertiser.delegate = self
         advertiser.startAdvertisingPeer()
-        browser = MCNearbyServiceBrowser(peer: peerID, serviceType: "hq-mesh")
+        browser = MCNearbyServiceBrowser(peer: myPeerID, serviceType: "hq-mesh")
         browser.delegate = self
         browser.startBrowsingForPeers()
     }
 
-    func send(_ message: String) {
-        let data = Data(message.utf8)
+    func send(_ text: String) {
+        guard let data = text.data(using: .utf8) else { return }
         try? session.send(data, toPeers: session.connectedPeers, with: .reliable)
-        messages.append("Вы: \(message)")
+        DispatchQueue.main.async { self.messages.append("Вы: \(text)") }
     }
 
     func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) {}
@@ -42,10 +54,13 @@ struct ContentView: View {
     @State var text = ""
     var body: some View {
         VStack {
+            Text("HQ Mesh System").font(.headline).padding()
             List(mesh.messages, id: \.self) { Text($0) }
             HStack {
                 TextField("Текст", text: $text).textFieldStyle(.roundedBorder)
-                Button("ОК") { mesh.send(text); text = "" }
+                Button("ОК") {
+                    if !text.isEmpty { mesh.send(text); text = "" }
+                }
             }.padding()
         }
     }
