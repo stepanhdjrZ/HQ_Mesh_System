@@ -1,62 +1,43 @@
 import SwiftUI
-import MultipeerConnectivity
+import PhotosUI
+import AVFoundation
 
 @main
 struct MessengerApp: App {
-    var body: some Scene {
-        WindowGroup { MainCoordinator() }
-    }
+    var body: some Scene { WindowGroup { MainCoordinator() } }
 }
 
-struct AppConfig {
-    static let host = "elevation-strength-authentic.ngrok-free.dev"
-    static let version = "6.6"
-}
-
-struct Message: Identifiable, Codable, Hashable {
+// MARK: - МОДЕЛИ
+struct Message: Identifiable, Codable {
     let id: UUID
     let text: String
     let senderID: String
+    let type: MsgType
+    let mediaURL: String?
     let isMe: Bool
 }
 
-struct ServerPacket: Codable {
-    let type: String
-    let version: String?
-    let payload: [Message]?
-}
+enum MsgType: String, Codable { case text, image, voice }
 
-class GlobalCore: NSObject, ObservableObject, MCSessionDelegate, MCNearbyServiceAdvertiserDelegate, MCNearbyServiceBrowserDelegate {
+// MARK: - ЯДРО
+class GlobalCore: NSObject, ObservableObject {
     @Published var messages: [Message] = []
-    @Published var peers = 0
     @Published var isOnline = false
-    @Published var showUpdate = false
-    @Published var serverV = ""
     @Published var name = UserDefaults.standard.string(forKey: "u_name") ?? ""
+    @Published var showUpdate = false
     
-    var session: MCSession!
     var ws: URLSessionWebSocketTask?
+    let host = "elevation-strength-authentic.ngrok-free.dev" // ТВОЙ АДРЕС
+    let currentVersion = "7.0"
 
     func setup(userName: String) {
         self.name = userName
         UserDefaults.standard.set(userName, forKey: "u_name")
-        let pid = MCPeerID(displayName: userName)
-        session = MCSession(peer: pid, securityIdentity: nil, encryptionPreference: .none)
-        session.delegate = self
-        
-        let adv = MCNearbyServiceAdvertiser(peer: pid, discoveryInfo: nil, serviceType: "hq-mesh")
-        adv.delegate = self
-        adv.startAdvertisingPeer()
-        
-        let browser = MCNearbyServiceBrowser(peer: pid, serviceType: "hq-mesh")
-        browser.delegate = self
-        browser.startBrowsingForPeers()
-        
         connect()
     }
 
     func connect() {
-        guard let url = URL(string: "wss://\(AppConfig.host)/ws") else { return }
+        guard let url = URL(string: "wss://\(host)/ws") else { return }
         ws = URLSession.shared.webSocketTask(with: url)
         ws?.resume()
         listen()
@@ -66,93 +47,127 @@ class GlobalCore: NSObject, ObservableObject, MCSessionDelegate, MCNearbyService
         ws?.receive { [weak self] res in
             guard let self = self, case .success(let msg) = res, case .string(let str) = msg,
                   let data = str.data(using: .utf8),
-                  let packet = try? JSONDecoder().decode(ServerPacket.self, from: data) else {
-                self?.listen()
-                return
-            }
+                  let m = try? JSONDecoder().decode(Message.self, from: data) else { self?.listen(); return }
             
-            DispatchQueue.main.async {
-                if packet.type == "version_check", let v = packet.version, v != AppConfig.version {
-                    self.serverV = v
-                    self.showUpdate = true
-                } else if packet.type == "msg", let p = packet.payload {
-                    self.messages.append(contentsOf: p.filter { m in !self.messages.contains(where: { $0.id == m.id }) })
-                }
-            }
+            DispatchQueue.main.async { if !m.isMe { self.messages.append(m) } }
             self.listen()
         }
     }
 
-    func update() {
-        let url = "itms-services://?action=download-manifest&url=https://\(AppConfig.host)/manifest.plist"
-        if let u = URL(string: url) { UIApplication.shared.open(u) }
-    }
-
-    func send(_ txt: String) {
-        let m = Message(id: UUID(), text: txt, senderID: name, isMe: true)
+    func send(text: String = "", type: MsgType = .text, url: String? = nil) {
+        let m = Message(id: UUID(), text: text, senderID: name, type: type, mediaURL: url, isMe: true)
         messages.append(m)
-        if let d = try? JSONEncoder().encode(m) {
-            try? session.send(d, toPeers: session.connectedPeers, with: .reliable)
-            ws?.send(.string(String(data: d, encoding: .utf8) ?? "")) { _ in }
-        }
+        if let d = try? JSONEncoder().encode(m) { ws?.send(.string(String(data: d, encoding: .utf8)!)) { _ in } }
     }
 
-    // Mesh
-    func session(_ s: MCSession, didReceive d: Data, fromPeer id: MCPeerID) {
-        if let m = try? JSONDecoder().decode(Message.self, from: d) {
-            DispatchQueue.main.async { self.messages.append(Message(id: m.id, text: m.text, senderID: m.senderID, isMe: false)) }
-        }
+    func uploadMedia(data: Data, ext: String) {
+        let url = URL(string: "https://\(host)/upload")!
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        let boundary = UUID().uuidString
+        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        
+        var body = Data()
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(UUID().uuidString).\(ext)\"\r\n\r\n".data(using: .utf8)!)
+        body.append(data)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        
+        URLSession.shared.uploadTask(with: req, from: body) { data, _, _ in
+            if let data = data, let res = try? JSONDecoder().decode([String: String].self, from: data) {
+                DispatchQueue.main.async { self.send(type: ext == "m4a" ? .voice : .image, url: res["url"]) }
+            }
+        }.resume()
     }
-    func session(_ s: MCSession, peer id: MCPeerID, didChange st: MCSessionState) { DispatchQueue.main.async { self.peers = s.connectedPeers.count; self.isOnline = (st == .connected) } }
-    func advertiser(_ a: MCNearbyServiceAdvertiser, didReceiveInvitationFromPeer id: MCPeerID, withContext c: Data?, invitationHandler: @escaping (Bool, MCSession?) -> Void) { invitationHandler(true, session) }
-    func browser(_ b: MCNearbyServiceBrowser, foundPeer id: MCPeerID, withDiscoveryInfo i: [String : String]?) { b.invitePeer(id, to: session, withContext: nil, timeout: 10) }
-    func browser(_ b: MCNearbyServiceBrowser, lostPeer id: MCPeerID) {}
-    func session(_ s: MCSession, didReceive stream: InputStream, withName n: String, fromPeer id: MCPeerID) {}
-    func session(_ s: MCSession, didStartReceivingResourceWithName n: String, fromPeer id: MCPeerID, with p: Progress) {}
-    func session(_ s: MCSession, didFinishReceivingResourceWithName n: String, fromPeer id: MCPeerID, at l: URL?, withError e: Error?) {}
 }
 
+// MARK: - ИНТЕРФЕЙС (TG Style)
 struct MainCoordinator: View {
     @StateObject var core = GlobalCore()
+    @State var pickerItem: PhotosPickerItem?
+    
     var body: some View {
         NavigationView {
-            if core.name.isEmpty {
-                VStack {
-                    TextField("Ник", text: $core.name).textFieldStyle(.roundedBorder).padding()
-                    Button("Войти") { core.setup(userName: core.name) }.buttonStyle(.borderedProminent)
-                }
-            } else {
-                VStack {
-                    HStack {
-                        Circle().fill(core.isOnline ? Color.blue : Color.red).frame(width: 10, height: 10)
-                        Text(core.isOnline ? "Cloud" : "Mesh").font(.caption)
-                        Spacer()
-                        Text("Узлов: \(core.peers)").font(.caption)
-                    }.padding()
-                    
-                    ScrollView {
-                        VStack {
-                            ForEach(core.messages) { m in
-                                HStack {
-                                    if m.isMe { Spacer() }
-                                    Text(m.text).padding(10).background(m.isMe ? Color.blue : Color.gray.opacity(0.2)).cornerRadius(12).foregroundColor(m.isMe ? .white : .primary)
-                                    if !m.isMe { Spacer() }
+            if core.name.isEmpty { RegistrationView(core: core) }
+            else {
+                VStack(spacing: 0) {
+                    // Chat List
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            VStack(spacing: 15) {
+                                ForEach(core.messages) { m in
+                                    MessageBubble(m: m)
                                 }
-                            }
-                        }.padding()
+                            }.padding()
+                        }
+                        .onChange(of: core.messages.count) { _ in withAnimation { proxy.scrollTo(core.messages.last?.id) } }
                     }
                     
-                    HStack {
-                        TextField("Сообщение...", text: $core.serverV).padding() // Используем поле для текста
-                        Button("🚀") { core.send(core.serverV); core.serverV = "" }
-                    }.padding()
+                    // Input Bar
+                    HStack(spacing: 15) {
+                        PhotosPicker(selection: $pickerItem, matching: .images) {
+                            Image(systemName: "paperclip").font(.title2).foregroundColor(.blue)
+                        }
+                        .onChange(of: pickerItem) { newItem in
+                            Task { if let data = try? await newItem?.loadTransferable(type: Data.self) { core.uploadMedia(data: data, ext: "jpg") } }
+                        }
+                        
+                        TextField("Сообщение", text: .constant("")).padding(10).background(Color(.systemGray6)).cornerRadius(20)
+                        
+                        Image(systemName: "mic.fill").font(.title2).foregroundColor(.blue)
+                    }.padding().background(Color(.systemBackground))
                 }
-                .navigationTitle("HQ Mesh")
-                .alert("Обнова v\(core.serverV)", isPresented: $core.showUpdate) {
-                    Button("Ставим!") { core.update() }
-                    Button("Отмена", role: .cancel) {}
-                }
+                .navigationTitle("HQ Global")
+                .navigationBarTitleDisplayMode(.inline)
             }
         }.onAppear { if !core.name.isEmpty { core.setup(userName: core.name) } }
+    }
+}
+
+struct MessageBubble: View {
+    let m: Message
+    var body: some View {
+        HStack {
+            if m.isMe { Spacer() }
+            VStack(alignment: m.isMe ? .trailing : .leading, spacing: 4) {
+                if !m.isMe { Text(m.senderID).font(.caption2).foregroundColor(.gray).padding(.leading, 5) }
+                
+                VStack(alignment: .leading, spacing: 0) {
+                    if m.type == .image, let url = m.mediaURL {
+                        AsyncImage(url: URL(string: url)) { img in
+                            img.resizable().scaledToFill()
+                        } placeholder: { ProgressView() }
+                        .frame(width: 200, height: 200).cornerRadius(12).padding(4)
+                    }
+                    
+                    if m.type == .voice {
+                        HStack {
+                            Image(systemName: "play.fill")
+                            Capsule().fill(Color.gray.opacity(0.3)).frame(width: 100, height: 4)
+                            Text("0:05").font(.caption2)
+                        }.padding(12)
+                    }
+                    
+                    if !m.text.isEmpty {
+                        Text(m.text).padding(12)
+                    }
+                }
+                .background(m.isMe ? Color.blue : Color(.systemGray5))
+                .foregroundColor(m.isMe ? .white : .primary)
+                .cornerRadius(18)
+            }
+            if !m.isMe { Spacer() }
+        }
+    }
+}
+
+struct RegistrationView: View {
+    @ObservedObject var core: GlobalCore
+    @State var n = ""
+    var body: some View {
+        VStack {
+            TextField("Твой ник", text: $n).textFieldStyle(.roundedBorder).padding()
+            Button("Войти") { core.setup(userName: n) }.buttonStyle(.borderedProminent)
+        }
     }
 }
