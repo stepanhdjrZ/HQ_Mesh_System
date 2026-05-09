@@ -1,0 +1,33 @@
+name: Build Messenger IPA
+on: [push]
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Inject HQ Connection Details
+        run: |
+          # Вписываем твой IP 192.168.0.55 и порт 12346 прямо в код
+          find . -name "*.swift" -exec sed -i '' 's/12345/12346/g' {} +
+          find . -name "*.swift" -exec sed -i '' 's/0.0.0.0/192.168.0.55/g' {} +
+
+      - name: Build Archive
+        run: |
+          xcodebuild archive \
+            -scheme Messenger \
+            -destination 'generic/platform=iOS' \
+            -archivePath Messenger.xcarchive \
+            -allowProvisioningUpdates
+
+      - name: Package IPA
+        run: |
+          mkdir -p Payload
+          cp -r Messenger.xcarchive/Products/Applications/*.app Payload/
+          zip -rv Messenger.ipa Payload
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: Messenger-App
+          path: Messenger.ipa
