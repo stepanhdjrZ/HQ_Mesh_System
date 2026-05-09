@@ -8,20 +8,22 @@ struct MessengerApp: App {
     }
 }
 
-// MARK: - МОДЕЛИ
+// MARK: - МОДЕЛЬ СООБЩЕНИЯ
 struct Message: Identifiable, Codable, Hashable {
     let id: UUID
     let text: String
     let senderID: String
+    let recipientID: String? // nil для общего чата
     let isMe: Bool
-    let viaServer: Bool // Флаг: пришло по Mesh или через Сервер
+    let viaServer: Bool
 }
 
 // MARK: - ГИБРИДНОЕ ЯДРО (Mesh + Server)
 class HybridCore: NSObject, ObservableObject, MCSessionDelegate, MCNearbyServiceAdvertiserDelegate, MCNearbyServiceBrowserDelegate {
-    @Published var messages: [Message] = []
+    @Published var groupMessages: [Message] = []
+    @Published var privateMessages: [String: [Message]] = [:] // Ник : [Сообщения]
+    @Published var peers: [MCPeerID] = []
     @Published var myName: String = UserDefaults.standard.string(forKey: "user_name") ?? ""
-    @Published var meshPeers: Int = 0
     @Published var isServerConnected: Bool = false
     
     // Mesh
@@ -48,82 +50,99 @@ class HybridCore: NSObject, ObservableObject, MCSessionDelegate, MCNearbyService
         browser.delegate = self
         browser.startBrowsingForPeers()
         
-        // 2. Старт Сервера (WebSocket)
+        // 2. Старт Сервера (Твой Ryzen)
         connectToServer()
     }
 
-    // Подключение к серверу
     func connectToServer() {
-        // Публичный тестовый сервер. Позже заменим на IP твоего компа!
-        guard let url = URL(string: "wss://echo.websocket.events") else { return }
+        // ВШИТ ТВОЙ ЛОКАЛЬНЫЙ IP ИЗ КОНСОЛИ
+        guard let url = URL(string: "ws://192.168.0.55:8080") else { return }
         let request = URLRequest(url: url)
         webSocketTask = URLSession.shared.webSocketTask(with: request)
         webSocketTask?.resume()
         
-        // Пинг, чтобы проверить статус
         webSocketTask?.sendPing { error in
             DispatchQueue.main.async { self.isServerConnected = (error == nil) }
         }
         receiveFromServer()
     }
 
-    // Отправка (Умная маршрутизация)
-    func send(_ text: String) {
-        let msg = Message(id: UUID(), text: text, senderID: myName, isMe: true, viaServer: false)
-        DispatchQueue.main.async { withAnimation { self.messages.append(msg) } }
+    func send(text: String, to recipient: MCPeerID? = nil) {
+        let msg = Message(id: UUID(), text: text, senderID: myName, recipientID: recipient?.displayName, isMe: true, viaServer: false)
         
-        let encoder = JSONEncoder()
-        guard let data = try? encoder.encode(msg) else { return }
-        
-        // Отправляем по Mesh
-        if !session.connectedPeers.isEmpty {
-            try? session.send(data, toPeers: session.connectedPeers, with: .reliable)
+        // Отрисовка у себя
+        DispatchQueue.main.async {
+            withAnimation {
+                if let target = recipient?.displayName {
+                    self.privateMessages[target, default: []].append(msg)
+                } else {
+                    self.groupMessages.append(msg)
+                }
+            }
         }
-        
-        // Отправляем на Сервер (если есть)
-        if isServerConnected {
-            let stringData = String(data: data, encoding: .utf8) ?? ""
-            webSocketTask?.send(.string(stringData)) { _ in }
+
+        if let data = try? JSONEncoder().encode(msg) {
+            // Отправка по Mesh
+            let targets = recipient != nil ? [recipient!] : session.connectedPeers
+            if !targets.isEmpty {
+                try? session.send(data, toPeers: targets, with: .reliable)
+            }
+            
+            // Отправка на Сервер
+            if isServerConnected {
+                let stringData = String(data: data, encoding: .utf8) ?? ""
+                webSocketTask?.send(.string(stringData)) { _ in }
+            }
         }
     }
 
-    // Прием с сервера
     func receiveFromServer() {
         webSocketTask?.receive { [weak self] result in
+            guard let self = self else { return }
             switch result {
             case .success(let message):
-                switch message {
-                case .string(let text):
-                    if let data = text.data(using: .utf8),
-                       let msg = try? JSONDecoder().decode(Message.self, from: data), msg.senderID != self?.myName {
-                        DispatchQueue.main.async {
-                            withAnimation {
-                                self?.messages.append(Message(id: msg.id, text: msg.text, senderID: msg.senderID, isMe: false, viaServer: true))
+                if case .string(let text) = message,
+                   let data = text.data(using: .utf8),
+                   let msg = try? JSONDecoder().decode(Message.self, from: data),
+                   msg.senderID != self.myName {
+                    
+                    DispatchQueue.main.async {
+                        withAnimation {
+                            let receivedMsg = Message(id: msg.id, text: msg.text, senderID: msg.senderID, recipientID: msg.recipientID, isMe: false, viaServer: true)
+                            
+                            if msg.recipientID == nil {
+                                self.groupMessages.append(receivedMsg)
+                            } else if msg.recipientID == self.myName {
+                                self.privateMessages[msg.senderID, default: []].append(receivedMsg)
                             }
                         }
                     }
-                default: break
                 }
             case .failure(_):
-                DispatchQueue.main.async { self?.isServerConnected = false }
+                DispatchQueue.main.async { self.isServerConnected = false }
             }
-            self?.receiveFromServer() // Ждем следующее
+            self.receiveFromServer()
         }
     }
 
-    // Прием по Mesh
     func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
         if let msg = try? JSONDecoder().decode(Message.self, from: data) {
             DispatchQueue.main.async {
                 withAnimation {
-                    self.messages.append(Message(id: msg.id, text: msg.text, senderID: msg.senderID, isMe: false, viaServer: false))
+                    let receivedMsg = Message(id: msg.id, text: msg.text, senderID: msg.senderID, recipientID: msg.recipientID, isMe: false, viaServer: false)
+                    
+                    if msg.recipientID == nil {
+                        self.groupMessages.append(receivedMsg)
+                    } else if msg.recipientID == self.myName {
+                        self.privateMessages[msg.senderID, default: []].append(receivedMsg)
+                    }
                 }
             }
         }
     }
 
     func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) {
-        DispatchQueue.main.async { self.meshPeers = session.connectedPeers.count }
+        DispatchQueue.main.async { self.peers = session.connectedPeers }
     }
     
     // Заглушки
@@ -140,7 +159,126 @@ struct MainCoordinator: View {
     @StateObject var core = HybridCore()
     var body: some View {
         if core.myName.isEmpty { RegistrationView(core: core) }
-        else { ChatView(core: core).onAppear { core.startSystem(name: core.myName) } }
+        else {
+            TabView {
+                GroupChatView(core: core)
+                    .tabItem { Label("Группа", systemImage: "person.3.fill") }
+                
+                PeersListView(core: core)
+                    .tabItem { Label("Личные", systemImage: "person.fill") }
+            }
+            .onAppear { core.startSystem(name: core.myName) }
+        }
+    }
+}
+
+struct GroupChatView: View {
+    @ObservedObject var core: HybridCore
+    @State var text = ""
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 0) {
+                StatusBar(core: core)
+                ChatBubbleList(messages: core.groupMessages)
+                MessageInput(text: $text) { core.send(text: text) }
+            }
+            .navigationTitle("Общий канал")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+}
+
+struct PeersListView: View {
+    @ObservedObject var core: HybridCore
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 0) {
+                StatusBar(core: core)
+                List(core.peers, id: \.self) { peer in
+                    NavigationLink(destination: PrivateChatView(core: core, peer: peer)) {
+                        HStack {
+                            Circle().fill(Color.blue.gradient).frame(width: 40, height: 40)
+                                .overlay(Text(String(peer.displayName.prefix(1)).uppercased()).foregroundColor(.white).bold())
+                            Text(peer.displayName).font(.headline)
+                        }
+                    }
+                }
+                .overlay(Group { if core.peers.isEmpty { Text("Рядом никого нет...").foregroundColor(.gray) } })
+            }
+            .navigationTitle("Контакты")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+}
+
+struct PrivateChatView: View {
+    @ObservedObject var core: HybridCore
+    let peer: MCPeerID
+    @State var text = ""
+    var body: some View {
+        VStack {
+            ChatBubbleList(messages: core.privateMessages[peer.displayName] ?? [])
+            MessageInput(text: $text) { core.send(text: text, to: peer) }
+        }
+        .navigationTitle(peer.displayName)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+struct StatusBar: View {
+    @ObservedObject var core: HybridCore
+    var body: some View {
+        HStack {
+            HStack {
+                Circle().fill(core.peers.count > 0 ? Color.green : Color.red).frame(width: 10, height: 10)
+                Text("Mesh: \(core.peers.count)")
+            }.padding(.horizontal)
+            Spacer()
+            HStack {
+                Text("Cloud").foregroundColor(core.isServerConnected ? .blue : .gray)
+                Image(systemName: core.isServerConnected ? "network" : "network.slash").foregroundColor(core.isServerConnected ? .blue : .red)
+            }.padding(.horizontal)
+        }.font(.caption).padding(.vertical, 5).background(Color(UIColor.secondarySystemBackground))
+    }
+}
+
+struct ChatBubbleList: View {
+    let messages: [Message]
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 12) {
+                ForEach(messages) { msg in
+                    HStack(alignment: .bottom) {
+                        if msg.isMe { Spacer() }
+                        VStack(alignment: msg.isMe ? .trailing : .leading) {
+                            if !msg.isMe {
+                                HStack {
+                                    Text(msg.senderID).font(.caption2).foregroundColor(.gray)
+                                    Image(systemName: msg.viaServer ? "cloud.fill" : "wave.3.left").font(.system(size: 8)).foregroundColor(.gray)
+                                }
+                            }
+                            Text(msg.text)
+                                .padding(12).background(msg.isMe ? Color.blue : Color(UIColor.secondarySystemBackground))
+                                .foregroundColor(msg.isMe ? .white : .primary).cornerRadius(18)
+                        }
+                        if !msg.isMe { Spacer() }
+                    }
+                }
+            }.padding()
+        }
+    }
+}
+
+struct MessageInput: View {
+    @Binding var text: String
+    var onSend: () -> Void
+    var body: some View {
+        HStack {
+            TextField("Сообщение...", text: $text).padding(10).background(Color.gray.opacity(0.1)).cornerRadius(20)
+            Button(action: { onSend(); text = "" }) {
+                Image(systemName: "arrow.up.circle.fill").font(.title).foregroundColor(.blue)
+            }.disabled(text.isEmpty)
+        }.padding()
     }
 }
 
@@ -150,63 +288,4 @@ struct RegistrationView: View {
     var body: some View {
         VStack(spacing: 30) {
             Text("🛰").font(.system(size: 80))
-            Text("HQ Network").font(.largeTitle).bold()
-            TextField("Твой ник", text: $name).padding().background(Color.gray.opacity(0.1)).cornerRadius(12).padding(.horizontal)
-            Button("Войти") { if !name.isEmpty { core.startSystem(name: name) } }.buttonStyle(.borderedProminent)
-        }.edgesIgnoringSafeArea(.all) // ФИКС МЕЛКОГО ЭКРАНА ДЛЯ UI
-    }
-}
-
-struct ChatView: View {
-    @ObservedObject var core: HybridCore
-    @State var text = ""
-    var body: some View {
-        NavigationView {
-            VStack {
-                // Статус Бар
-                HStack {
-                    HStack {
-                        Circle().fill(core.meshPeers > 0 ? Color.green : Color.red).frame(width: 10, height: 10)
-                        Text("Mesh: \(core.meshPeers)")
-                    }.padding(.horizontal)
-                    Spacer()
-                    HStack {
-                        Text("Cloud").foregroundColor(core.isServerConnected ? .blue : .gray)
-                        Image(systemName: core.isServerConnected ? "network" : "network.slash").foregroundColor(core.isServerConnected ? .blue : .red)
-                    }.padding(.horizontal)
-                }.font(.caption).padding(.vertical, 5).background(Color(UIColor.secondarySystemBackground))
-                
-                ScrollView {
-                    VStack(spacing: 12) {
-                        ForEach(core.messages) { msg in
-                            HStack(alignment: .bottom) {
-                                if msg.isMe { Spacer() }
-                                VStack(alignment: msg.isMe ? .trailing : .leading) {
-                                    if !msg.isMe {
-                                        HStack {
-                                            Text(msg.senderID).font(.caption2).foregroundColor(.gray)
-                                            Image(systemName: msg.viaServer ? "cloud.fill" : "wave.3.left").font(.system(size: 8)).foregroundColor(.gray)
-                                        }
-                                    }
-                                    Text(msg.text)
-                                        .padding(12).background(msg.isMe ? Color.blue : Color(UIColor.secondarySystemBackground))
-                                        .foregroundColor(msg.isMe ? .white : .primary).cornerRadius(18)
-                                }
-                                if !msg.isMe { Spacer() }
-                            }
-                        }
-                    }.padding()
-                }
-                
-                HStack {
-                    TextField("Сообщение...", text: $text).padding(10).background(Color.gray.opacity(0.1)).cornerRadius(20)
-                    Button(action: { core.send(text); text = "" }) {
-                        Image(systemName: "arrow.up.circle.fill").font(.title).foregroundColor(.blue)
-                    }.disabled(text.isEmpty)
-                }.padding()
-            }
-            .navigationTitle("HQ Global")
-            .navigationBarTitleDisplayMode(.inline)
-        }
-    }
-}
+            Text("HQ Global").font(.largeTitle).
