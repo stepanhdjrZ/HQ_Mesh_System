@@ -1,31 +1,23 @@
-name: Build Messenger IPA
+name: Build Pure IPA
 on: [push]
 jobs:
   build:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Inject HQ Connection Details
+      - name: Compile
         run: |
-          find . -name "*.swift" -exec sed -i '' 's/12345/12346/g' {} +
-          find . -name "*.swift" -exec sed -i '' 's/0.0.0.0/192.168.0.55/g' {} +
-
-      - name: Build Archive
+          xcrun --sdk iphoneos swiftc ContentView.swift \
+            -target arm64-apple-ios17.0 \
+            -sdk $(xcrun --show-sdk-path --sdk iphoneos) \
+            -emit-executable -o Messenger
+      - name: Package
         run: |
-          xcodebuild archive \
-            -scheme Messenger \
-            -destination 'generic/platform=iOS' \
-            -archivePath Messenger.xcarchive \
-            -allowProvisioningUpdates
-
-      - name: Package IPA
-        run: |
-          mkdir -p Payload
-          cp -r Messenger.xcarchive/Products/Applications/*.app Payload/
-          zip -rv Messenger.ipa Payload
-
-      - name: Upload Artifact
+          mkdir -p Payload/Messenger.app
+          mv Messenger Payload/Messenger.app/
+          cp Info.plist Payload/Messenger.app/
+          zip -r Messenger.ipa Payload
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: Messenger-App
