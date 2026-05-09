@@ -1,0 +1,60 @@
+name: Build Ghost Mesh (For iPhone 11)
+on: [push]
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Compile Ghost Version
+        run: |
+          # Компилируем под более широкую базу iOS 15.0
+          xcrun --sdk iphoneos swiftc ContentView.swift \
+            -target arm64-apple-ios15.0 \
+            -sdk $(xcrun --show-sdk-path --sdk iphoneos) \
+            -swift-version 5 \
+            -parse-as-library \
+            -framework SwiftUI \
+            -framework UIKit \
+            -emit-executable -o GhostMesh
+
+      - name: Assemble Ghost IPA
+        run: |
+          mkdir -p Payload/GhostMesh.app
+          mv GhostMesh Payload/GhostMesh.app/
+          
+          # Генерируем новый Info.plist прямо здесь, чтобы не запутаться
+          cat <<EOF > Payload/GhostMesh.app/Info.plist
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>GhostMesh</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.hq.ghostmesh</string>
+              <key>CFBundleName</key>
+              <string>Ghost Mesh</string>
+              <key>CFBundleDisplayName</key>
+              <string>Ghost Mesh</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleShortVersionString</key>
+              <string>1.0</string>
+              <key>LSRequiresIPhoneOS</key>
+              <true/>
+              <key>MinimumOSVersion</key>
+              <string>15.0</string>
+              <key>UILaunchStoryboardName</key>
+              <string>LaunchScreen</string>
+          </dict>
+          </plist>
+          EOF
+          
+          zip -r GhostMesh.ipa Payload
+          
+      - name: Upload Ghost Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ghost-Mesh-11
+          path: GhostMesh.ipa
