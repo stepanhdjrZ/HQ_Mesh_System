@@ -8,13 +8,7 @@ struct MessengerApp: App {
     }
 }
 
-// MARK: - НАСТРОЙКИ СВЯЗИ
-struct AppConfig {
-    // ЗАМЕНИ НА СВОЙ ВНЕШНИЙ IP ИЛИ АДРЕС NGROK ДЛЯ СВЯЗИ НА РАССТОЯНИИ
-    static let serverURL = "ws://192.168.0.55:8080" 
-}
-
-// MARK: - МОДЕЛЬ СООБЩЕНИЯ
+// MARK: - МОДЕЛИ (с поддержкой сохранения)
 struct Message: Identifiable, Codable, Hashable {
     let id: UUID
     let text: String
@@ -24,10 +18,14 @@ struct Message: Identifiable, Codable, Hashable {
     let viaServer: Bool
 }
 
-// MARK: - ЯДРО СИСТЕМЫ
+struct ServerPacket: Codable {
+    let type: String
+    let payload: [Message]
+}
+
+// MARK: - ГИБРИДНОЕ ЯДРО С ПАМЯТЬЮ
 class GlobalCore: NSObject, ObservableObject, MCSessionDelegate, MCNearbyServiceAdvertiserDelegate, MCNearbyServiceBrowserDelegate {
     @Published var groupMessages: [Message] = []
-    @Published var privateMessages: [String: [Message]] = [:]
     @Published var peers: [MCPeerID] = []
     @Published var myName: String = UserDefaults.standard.string(forKey: "user_name") ?? ""
     @Published var isServerConnected: Bool = false
@@ -37,6 +35,13 @@ class GlobalCore: NSObject, ObservableObject, MCSessionDelegate, MCNearbyService
     var browser: MCNearbyServiceBrowser!
     var myPeerID: MCPeerID!
     var webSocketTask: URLSessionWebSocketTask?
+    
+    let historyURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("history.json")
+
+    override init() {
+        super.init()
+        loadLocalHistory() // Загружаем старые чаты при запуске
+    }
 
     func start(name: String) {
         self.myName = name
@@ -57,10 +62,24 @@ class GlobalCore: NSObject, ObservableObject, MCSessionDelegate, MCNearbyService
         connectToServer()
     }
 
+    // ЛОКАЛЬНОЕ ХРАНЕНИЕ
+    func saveLocally() {
+        if let data = try? JSONEncoder().encode(groupMessages) {
+            try? data.write(to: historyURL)
+        }
+    }
+
+    func loadLocalHistory() {
+        if let data = try? Data(contentsOf: historyURL),
+           let decoded = try? JSONDecoder().decode([Message].self, from: data) {
+            self.groupMessages = decoded
+        }
+    }
+
     func connectToServer() {
-        guard let url = URL(string: AppConfig.serverURL) else { return }
-        let request = URLRequest(url: url)
-        webSocketTask = URLSession.shared.webSocketTask(with: request)
+        // ЗАМЕНИ НА СВОЙ IP: 192.168.0.55
+        guard let url = URL(string: "ws://192.168.0.55:8080") else { return }
+        webSocketTask = URLSession.shared.webSocketTask(with: url)
         webSocketTask?.resume()
         
         webSocketTask?.sendPing { error in
@@ -69,25 +88,22 @@ class GlobalCore: NSObject, ObservableObject, MCSessionDelegate, MCNearbyService
         receiveFromServer()
     }
 
-    func send(text: String, to recipient: MCPeerID? = nil) {
-        let msg = Message(id: UUID(), text: text, senderID: myName, recipientID: recipient?.displayName, isMe: true, viaServer: false)
+    func send(text: String) {
+        let msg = Message(id: UUID(), text: text, senderID: myName, recipientID: nil, isMe: true, viaServer: false)
         
         DispatchQueue.main.async {
             withAnimation {
-                if let target = recipient?.displayName { self.privateMessages[target, default: []].append(msg) }
-                else { self.groupMessages.append(msg) }
+                self.groupMessages.append(msg)
+                self.saveLocally()
             }
         }
 
         if let data = try? JSONEncoder().encode(msg) {
-            // Mesh
-            let targets = recipient != nil ? [recipient!] : session.connectedPeers
-            if !targets.isEmpty { try? session.send(data, toPeers: targets, with: .reliable) }
-            
-            // Server (Distanced communication)
+            if !session.connectedPeers.isEmpty {
+                try? session.send(data, toPeers: session.connectedPeers, with: .reliable)
+            }
             if isServerConnected {
-                let stringData = String(data: data, encoding: .utf8) ?? ""
-                webSocketTask?.send(.string(stringData)) { _ in }
+                webSocketTask?.send(.string(String(data: data, encoding: .utf8) ?? "")) { _ in }
             }
         }
     }
@@ -96,15 +112,26 @@ class GlobalCore: NSObject, ObservableObject, MCSessionDelegate, MCNearbyService
         webSocketTask?.receive { [weak self] result in
             guard let self = self else { return }
             if case .success(let message) = result, case .string(let text) = message,
-               let data = text.data(using: .utf8),
-               let msg = try? JSONDecoder().decode(Message.self, from: data),
-               msg.senderID != self.myName {
+               let data = text.data(using: .utf8) {
                 
-                DispatchQueue.main.async {
-                    withAnimation {
-                        let receivedMsg = Message(id: msg.id, text: msg.text, senderID: msg.senderID, recipientID: msg.recipientID, isMe: false, viaServer: true)
-                        if msg.recipientID == nil { self.groupMessages.append(receivedMsg) }
-                        else if msg.recipientID == self.myName { self.privateMessages[msg.senderID, default: []].append(receivedMsg) }
+                // Обрабатываем либо одно сообщение, либо целую историю
+                if let packet = try? JSONDecoder().decode(ServerPacket.self, from: data) {
+                    DispatchQueue.main.async {
+                        if packet.type == "history" {
+                            // Умное слияние истории: добавляем только те, которых у нас нет
+                            let newMsgs = packet.payload.filter { p in !self.groupMessages.contains(where: { $0.id == p.id }) }
+                            self.groupMessages.append(contentsOf: newMsgs.map { 
+                                Message(id: $0.id, text: $0.text, senderID: $0.senderID, recipientID: $0.recipientID, isMe: $0.senderID == self.myName, viaServer: true)
+                            })
+                        }
+                        self.saveLocally()
+                    }
+                } else if let msg = try? JSONDecoder().decode(Message.self, from: data), msg.senderID != self.myName {
+                    DispatchQueue.main.async {
+                        withAnimation {
+                            self.groupMessages.append(Message(id: msg.id, text: msg.text, senderID: msg.senderID, recipientID: msg.recipientID, isMe: false, viaServer: true))
+                            self.saveLocally()
+                        }
                     }
                 }
             }
@@ -112,23 +139,20 @@ class GlobalCore: NSObject, ObservableObject, MCSessionDelegate, MCNearbyService
         }
     }
 
-    // Mesh Handlers
+    // Mesh (аналогично добавляем saveLocally)
     func session(_ session: MCSession, didReceive data: Data, fromPeer id: MCPeerID) {
         if let msg = try? JSONDecoder().decode(Message.self, from: data) {
             DispatchQueue.main.async {
                 withAnimation {
-                    let receivedMsg = Message(id: msg.id, text: msg.text, senderID: msg.senderID, recipientID: msg.recipientID, isMe: false, viaServer: false)
-                    if msg.recipientID == nil { self.groupMessages.append(receivedMsg) }
-                    else if msg.recipientID == self.myName { self.privateMessages[msg.senderID, default: []].append(receivedMsg) }
+                    self.groupMessages.append(Message(id: msg.id, text: msg.text, senderID: msg.senderID, recipientID: msg.recipientID, isMe: false, viaServer: false))
+                    self.saveLocally()
                 }
             }
         }
     }
-
-    func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) {
-        DispatchQueue.main.async { self.peers = session.connectedPeers }
-    }
     
+    // Стандартные методы Mesh (оставляем без изменений)
+    func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) { DispatchQueue.main.async { self.peers = session.connectedPeers } }
     func advertiser(_ a: MCNearbyServiceAdvertiser, didReceiveInvitationFromPeer id: MCPeerID, withContext c: Data?, invitationHandler: @escaping (Bool, MCSession?) -> Void) { invitationHandler(true, session) }
     func browser(_ b: MCNearbyServiceBrowser, foundPeer id: MCPeerID, withDiscoveryInfo i: [String : String]?) { b.invitePeer(id, to: session, withContext: nil, timeout: 10) }
     func browser(_ b: MCNearbyServiceBrowser, lostPeer id: MCPeerID) {}
@@ -137,117 +161,64 @@ class GlobalCore: NSObject, ObservableObject, MCSessionDelegate, MCNearbyService
     func session(_ s: MCSession, didFinishReceivingResourceWithName n: String, fromPeer id: MCPeerID, at l: URL?, withError e: Error?) {}
 }
 
-// MARK: - UI
+// MARK: - UI (фикс экрана Pro Max + статус)
 struct MainCoordinator: View {
     @StateObject var core = GlobalCore()
     var body: some View {
-        if core.myName.isEmpty { RegistrationView(core: core) }
-        else {
-            TabView {
-                GroupChatView(core: core).tabItem { Label("Группа", systemImage: "person.3.fill") }
-                PeersListView(core: core).tabItem { Label("Личные", systemImage: "person.fill") }
-            }.onAppear { core.start(name: core.myName) }
-        }
-    }
-}
-
-struct GroupChatView: View {
-    @ObservedObject var core: GlobalCore
-    @State var text = ""
-    var body: some View {
         NavigationView {
-            VStack(spacing: 0) {
-                StatusBar(core: core)
-                ChatBubbleList(messages: core.groupMessages)
-                MessageInput(text: $text) { core.send(text: text) }
-            }.navigationTitle("HQ Global").navigationBarTitleDisplayMode(.inline)
-        }
+            if core.myName.isEmpty { RegistrationView(core: core) }
+            else {
+                VStack(spacing: 0) {
+                    HStack {
+                        Circle().fill(core.isServerConnected ? Color.blue : Color.red).frame(width: 8, height: 8)
+                        Text(core.isServerConnected ? "Центр на связи" : "Локальный режим").font(.caption).foregroundColor(.gray)
+                        Spacer()
+                        Text("Узлов: \(core.peers.count)").font(.caption).foregroundColor(.gray)
+                    }.padding(.horizontal).padding(.top, 5)
+                    
+                    ChatView(core: core)
+                }
+                .navigationTitle("HQ Global")
+                .navigationBarTitleDisplayMode(.inline)
+                .onAppear { core.start(name: core.myName) }
+            }
+        }.navigationViewStyle(.stack)
     }
 }
 
-struct PeersListView: View {
+struct ChatView: View {
     @ObservedObject var core: GlobalCore
-    var body: some View {
-        NavigationView {
-            VStack(spacing: 0) {
-                StatusBar(core: core)
-                List(core.peers, id: \.self) { peer in
-                    NavigationLink(destination: PrivateChatView(core: core, peer: peer)) {
-                        HStack {
-                            Circle().fill(Color.blue.gradient).frame(width: 40, height: 40)
-                                .overlay(Text(String(peer.displayName.prefix(1)).uppercased()).foregroundColor(.white).bold())
-                            Text(peer.displayName).font(.headline)
-                        }
-                    }
-                }.overlay(Group { if core.peers.isEmpty { Text("Рядом никого нет...").foregroundColor(.gray) } })
-            }.navigationTitle("Контакты").navigationBarTitleDisplayMode(.inline)
-        }
-    }
-}
-
-struct PrivateChatView: View {
-    @ObservedObject var core: GlobalCore
-    let peer: MCPeerID
     @State var text = ""
     var body: some View {
         VStack {
-            ChatBubbleList(messages: core.privateMessages[peer.displayName] ?? [])
-            MessageInput(text: $text) { core.send(text: text, to: peer) }
-        }.navigationTitle(peer.displayName).navigationBarTitleDisplayMode(.inline)
-    }
-}
-
-struct StatusBar: View {
-    @ObservedObject var core: GlobalCore
-    var body: some View {
-        HStack {
-            HStack {
-                Circle().fill(core.peers.count > 0 ? Color.green : Color.red).frame(width: 10, height: 10)
-                Text("Mesh: \(core.peers.count)")
-            }.padding(.horizontal)
-            Spacer()
-            HStack {
-                Text("Cloud").foregroundColor(core.isServerConnected ? .blue : .gray)
-                Image(systemName: core.isServerConnected ? "network" : "network.slash").foregroundColor(core.isServerConnected ? .blue : .red)
-            }.padding(.horizontal)
-        }.font(.caption).padding(.vertical, 5).background(Color(UIColor.secondarySystemBackground))
-    }
-}
-
-struct ChatBubbleList: View {
-    let messages: [Message]
-    var body: some View {
-        ScrollView {
-            VStack(spacing: 12) {
-                ForEach(messages) { msg in
-                    HStack(alignment: .bottom) {
-                        if msg.isMe { Spacer() }
-                        VStack(alignment: msg.isMe ? .trailing : .leading) {
-                            if !msg.isMe {
-                                HStack {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 12) {
+                        ForEach(core.groupMessages) { msg in
+                            HStack {
+                                if msg.isMe { Spacer() }
+                                VStack(alignment: msg.isMe ? .trailing : .leading) {
                                     Text(msg.senderID).font(.caption2).foregroundColor(.gray)
-                                    Image(systemName: msg.viaServer ? "cloud.fill" : "wave.3.left").font(.system(size: 8)).foregroundColor(.gray)
+                                    Text(msg.text).padding(12).background(msg.isMe ? Color.blue : Color(.secondarySystemBackground))
+                                        .foregroundColor(msg.isMe ? .white : .primary).cornerRadius(16)
                                 }
-                            }
-                            Text(msg.text).padding(12).background(msg.isMe ? Color.blue : Color(UIColor.secondarySystemBackground))
-                                .foregroundColor(msg.isMe ? .white : .primary).cornerRadius(18)
+                                if !msg.isMe { Spacer() }
+                            }.id(msg.id)
                         }
-                        if !msg.isMe { Spacer() }
-                    }
+                    }.padding()
                 }
+                .onChange(of: core.groupMessages.count) { _ in
+                    withAnimation { proxy.scrollTo(core.groupMessages.last?.id) }
+                }
+            }
+            
+            HStack {
+                TextField("Сообщение...", text: $text).padding(10).background(Color(.systemGray6)).cornerRadius(20)
+                Button(action: { core.send(text: text); text = "" }) {
+                    Image(systemName: "arrow.up.circle.fill").font(.system(size: 32))
+                }.disabled(text.isEmpty)
             }.padding()
         }
-    }
-}
-
-struct MessageInput: View {
-    @Binding var text: String
-    var onSend: () -> Void
-    var body: some View {
-        HStack {
-            TextField("Сообщение...", text: $text).padding(10).background(Color.gray.opacity(0.1)).cornerRadius(20)
-            Button(action: { onSend(); text = "" }) { Image(systemName: "arrow.up.circle.fill").font(.title).foregroundColor(.blue) }.disabled(text.isEmpty)
-        }.padding()
     }
 }
 
@@ -255,11 +226,11 @@ struct RegistrationView: View {
     @ObservedObject var core: GlobalCore
     @State var name = ""
     var body: some View {
-        VStack(spacing: 30) {
+        VStack(spacing: 20) {
             Text("🛰").font(.system(size: 80))
-            Text("HQ Global").font(.largeTitle).bold()
-            TextField("Твой ник", text: $name).padding().background(Color.gray.opacity(0.1)).cornerRadius(12).padding(.horizontal)
-            Button("Войти") { if !name.isEmpty { core.start(name: name) } }.buttonStyle(.borderedProminent)
-        }.edgesIgnoringSafeArea(.all)
+            Text("Вход в HQ Mesh").font(.title).bold()
+            TextField("Никнейм", text: $name).padding().background(Color(.systemGray6)).cornerRadius(12).padding(.horizontal)
+            Button("Начать") { if !name.isEmpty { core.start(name: name) } }.buttonStyle(.borderedProminent)
+        }
     }
 }
