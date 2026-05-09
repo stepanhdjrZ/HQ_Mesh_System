@@ -5,26 +5,19 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Compile App
+      - name: Compile
         run: |
-          # Собираем оба файла в один исполняемый файл
-          xcrun --sdk iphoneos swiftc ContentView.swift App.swift \
+          xcrun --sdk iphoneos swiftc ContentView.swift \
             -target arm64-apple-ios17.0 \
             -sdk $(xcrun --show-sdk-path --sdk iphoneos) \
-            -emit-executable \
-            -o Messenger
-
-      - name: Assemble IPA Bundle
+            -emit-executable -o Messenger
+      - name: Package
         run: |
-          # Создаем структуру папок, которую понимает iOS
           mkdir -p Payload/Messenger.app
           mv Messenger Payload/Messenger.app/
           cp Info.plist Payload/Messenger.app/
-          # Запаковываем в финальный IPA
           zip -r Messenger.ipa Payload
-          
-      - name: Upload Finished Artifact
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: Messenger-App
