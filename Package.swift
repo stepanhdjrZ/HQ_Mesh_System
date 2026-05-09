@@ -1,9 +1,23 @@
-﻿import PackageDescription
-import AppleProductTypes
+// swift-tools-version: 6.1
+import PackageDescription
 
 let package = Package(
-    name: "MeshChat",
-    platforms: [.iOS("16.0")],
-    products: [.iOSApplication(name: "MeshChat", targets: ["AppModule"], displayVersion: "1.0", bundleVersion: "1", appIcon: .placeholder(icon: .chat), supportedDeviceFamilies: [.iphone], supportedInterfaceOrientations: [.portrait], capabilities: [.bluetoothAlways(purposeString: "Связь без интернета"), .localNetwork(purposeString: "Связь в Wi-Fi")])],
-    targets: [.executableTarget(name: "AppModule", path: "Sources")]
+    name: "Messenger",
+    platforms: [
+        .iOS(.v17) 
+    ],
+    products: [
+        .executable(
+            name: "Messenger",
+            targets: ["Messenger"]
+        )
+    ],
+    targets: [
+        .executableTarget(
+            name: "Messenger",
+            path: ".",
+            exclude: [".github"],
+            sources: ["ContentView.swift"]
+        )
+    ]
 )
