@@ -1,12 +1,14 @@
-name: Build Pure IPA
+name: Build Hybrid HQ
 on: [push]
 jobs:
   build:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Compile
+      
+      - name: Compile App
         run: |
+          # Собираем под iOS 17 (Идеально для 14, 16 и 17 Pro Max)
           xcrun --sdk iphoneos swiftc ContentView.swift \
             -target arm64-apple-ios17.0 \
             -sdk $(xcrun --show-sdk-path --sdk iphoneos) \
@@ -15,14 +17,50 @@ jobs:
             -framework SwiftUI \
             -framework UIKit \
             -emit-executable -o Messenger
-      - name: Package
+
+      - name: Generate Info.plist & Assemble
         run: |
           mkdir -p Payload/Messenger.app
           mv Messenger Payload/Messenger.app/
-          cp Info.plist Payload/Messenger.app/
-          zip -r Messenger.ipa Payload
-      - name: Upload
-        uses: actions/upload-artifact@v4
-        with:
-          name: Messenger-App
-          path: Messenger.ipa
+          
+          # Генерируем идеальный конфиг прямо на сервере
+          cat <<EOF > Payload/Messenger.app/Info.plist
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>Messenger</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.hq.globalmesh</string>
+              <key>CFBundleName</key>
+              <string>HQ Global</string>
+              <key>CFBundleDisplayName</key>
+              <string>HQ Global</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleShortVersionString</key>
+              <string>5.0</string>
+              <key>LSRequiresIPhoneOS</key>
+              <true/>
+              <key>MinimumOSVersion</key>
+              <string>17.0</string>
+              
+              <key>UILaunchScreen</key>
+              <dict/>
+              
+              <key>NSLocalNetworkUsageDescription</key>
+              <string>Требуется для поиска узлов сети</string>
+              <key>NSBonjourServices</key>
+              <array>
+                  <string>_hq-mesh._tcp</string>
+                  <string>_hq-mesh._udp</string>
+              </array>
+          </dict>
+          </plist>
+          EOF
+          
+          # Если ты загрузил icon.png в Гитхаб, вшиваем его!
+          if [ -f "icon.png" ]; then
+            cp icon.png Payload/Messenger.app/AppIcon.png
+            sed -i '' 's/<\/dict>/
