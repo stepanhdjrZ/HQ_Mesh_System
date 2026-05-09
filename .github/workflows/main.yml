@@ -5,18 +5,25 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      
       - name: Compile
         run: |
           xcrun --sdk iphoneos swiftc ContentView.swift \
             -target arm64-apple-ios17.0 \
             -sdk $(xcrun --show-sdk-path --sdk iphoneos) \
+            -swift-version 5 \
+            -parse-as-library \
+            -framework SwiftUI \
+            -framework UIKit \
             -emit-executable -o Messenger
+            
       - name: Package
         run: |
           mkdir -p Payload/Messenger.app
           mv Messenger Payload/Messenger.app/
           cp Info.plist Payload/Messenger.app/
           zip -r Messenger.ipa Payload
+          
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
