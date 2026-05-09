@@ -1,4 +1,4 @@
-name: Build Hybrid HQ
+name: Build OTA Enabled Mesh
 on: [push]
 jobs:
   build:
@@ -17,39 +17,36 @@ jobs:
             -framework UIKit \
             -emit-executable -o Messenger
 
-      - name: Generate Info.plist & Assemble
+      - name: Generate OTA Config & Assemble
         run: |
           mkdir -p Payload/Messenger.app
           mv Messenger Payload/Messenger.app/
           
-          # Бронебойный генератор конфига (не боится пробелов)
-          echo '<?xml version="1.0" encoding="UTF-8"?>' > Payload/Messenger.app/Info.plist
-          echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' >> Payload/Messenger.app/Info.plist
-          echo '<plist version="1.0"><dict>' >> Payload/Messenger.app/Info.plist
-          echo '<key>CFBundleExecutable</key><string>Messenger</string>' >> Payload/Messenger.app/Info.plist
-          echo '<key>CFBundleIdentifier</key><string>com.hq.globalmesh</string>' >> Payload/Messenger.app/Info.plist
-          echo '<key>CFBundleName</key><string>HQ Global</string>' >> Payload/Messenger.app/Info.plist
-          echo '<key>CFBundleDisplayName</key><string>HQ Global</string>' >> Payload/Messenger.app/Info.plist
-          echo '<key>MinimumOSVersion</key><string>17.0</string>' >> Payload/Messenger.app/Info.plist
-          
-          # ФИКС ПОЛНОГО ЭКРАНА
-          echo '<key>UILaunchScreen</key><dict/>' >> Payload/Messenger.app/Info.plist
-          
-          # ДОСТУП К СЕТИ В ФОНЕ
-          echo '<key>NSLocalNetworkUsageDescription</key><string>Требуется для поиска узлов сети</string>' >> Payload/Messenger.app/Info.plist
-          echo '<key>NSBonjourServices</key><array><string>_hq-mesh._tcp</string><string>_hq-mesh._udp</string></array>' >> Payload/Messenger.app/Info.plist
-          echo '</dict></plist>' >> Payload/Messenger.app/Info.plist
-          
-          # Вшиваем иконку, если она есть
-          if [ -f "icon.png" ]; then
-            cp icon.png Payload/Messenger.app/AppIcon.png
-            sed -i '' 's/<\/dict>/<key>CFBundleIconFiles<\/key><array><string>AppIcon<\/string><\/array><\/dict>/' Payload/Messenger.app/Info.plist
-          fi
+          # Создаем Info.plist с поддержкой OTA и фиксом экрана
+          cat <<EOF > Payload/Messenger.app/Info.plist
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key><string>Messenger</string>
+              <key>CFBundleIdentifier</key><string>com.hq.globalmesh</string>
+              <key>CFBundleName</key><string>HQ Global</string>
+              <key>CFBundleDisplayName</key><string>HQ Global</string>
+              <key>CFBundlePackageType</key><string>APPL</string>
+              <key>CFBundleShortVersionString</key><string>6.5</string>
+              <key>LSRequiresIPhoneOS</key><true/>
+              <key>MinimumOSVersion</key><string>17.0</string>
+              <key>UILaunchScreen</key><dict/>
+              <key>NSLocalNetworkUsageDescription</key><string>Mesh-сеть для связи</string>
+              <key>NSBonjourServices</key><array><string>_hq-mesh._tcp</string><string>_hq-mesh._udp</string></array>
+          </dict>
+          </plist>
+          EOF
           
           zip -r Messenger.ipa Payload
           
-      - name: Upload Finished Artifact
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Hybrid-HQ-App
+          name: OTA-Starter-Build
           path: Messenger.ipa
