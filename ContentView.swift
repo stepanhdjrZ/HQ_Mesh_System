@@ -11,7 +11,7 @@ struct MessengerApp: App {
 }
 
 class MeshManager: NSObject, ObservableObject, MCSessionDelegate, MCNearbyServiceAdvertiserDelegate, MCNearbyServiceBrowserDelegate {
-    @Published var messages: [String] = ["Связь установлена"]
+    @Published var messages: [String] = ["Сеть активна"]
     var session: MCSession!
     var advertiser: MCNearbyServiceAdvertiser!
     var browser: MCNearbyServiceBrowser!
@@ -30,9 +30,10 @@ class MeshManager: NSObject, ObservableObject, MCSessionDelegate, MCNearbyServic
     }
 
     func send(_ text: String) {
-        guard let data = text.data(using: .utf8) else { return }
-        try? session.send(data, toPeers: session.connectedPeers, with: .reliable)
-        DispatchQueue.main.async { self.messages.append("Вы: \(text)") }
+        if let data = text.data(using: .utf8) {
+            try? session.send(data, toPeers: session.connectedPeers, with: .reliable)
+            messages.append("Вы: \(text)")
+        }
     }
 
     func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) {}
@@ -54,13 +55,10 @@ struct ContentView: View {
     @State var text = ""
     var body: some View {
         VStack {
-            Text("HQ Mesh System").font(.headline).padding()
             List(mesh.messages, id: \.self) { Text($0) }
             HStack {
                 TextField("Текст", text: $text).textFieldStyle(.roundedBorder)
-                Button("ОК") {
-                    if !text.isEmpty { mesh.send(text); text = "" }
-                }
+                Button("ОК") { if !text.isEmpty { mesh.send(text); text = "" } }
             }.padding()
         }
     }
