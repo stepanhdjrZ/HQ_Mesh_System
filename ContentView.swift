@@ -1,7 +1,3 @@
-import SwiftUI
-import MultipeerConnectivity
-
-@MainActor
 class MeshManager: NSObject, ObservableObject, MCSessionDelegate, MCNearbyServiceAdvertiserDelegate, MCNearbyServiceBrowserDelegate {
     @Published var messages: [String] = ["Сеть готова"]
     var peerID = MCPeerID(displayName: "User-\(Int.random(in: 100...999))")
