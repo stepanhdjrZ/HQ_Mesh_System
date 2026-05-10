@@ -6,26 +6,24 @@ import MultipeerConnectivity
 @main
 struct MessengerApp: App { var body: some Scene { WindowGroup { MainCoordinator() } } }
 
-enum MsgType: String, Codable { case text, image, video, voice, call }
-struct Message: Identifiable, Codable, Hashable { let id: UUID; let text: String; let senderID: String; let target: String; let isGroup: Bool; let type: MsgType; let url: String?; let isMe: Bool; let timestamp: Date }
+enum MsgType: String, Codable { case text, image, voice, circle, call }
+struct Message: Identifiable, Codable, Hashable { let id: UUID; let text: String; let senderID: String; let target: String; let isGroup: Bool; let type: MsgType; let url: String?; let isMe: Bool }
 
-// Модель Чата
 struct Chat: Identifiable, Hashable {
-    let id: String // Имя контакта или название группы
-    let isGroup: Bool
-    var messages: [Message]
-    var lastMessage: String { messages.last?.text ?? (messages.last?.type == .voice ? "Голосовое сообщение" : "Медиа") }
+    let id: String; let isGroup: Bool; var messages: [Message]
+    var lastMsg: String { messages.last?.text ?? (messages.last?.type == .circle ? "Кружочек" : "Медиа") }
 }
 
 class GlobalCore: NSObject, ObservableObject, MCSessionDelegate, MCNearbyServiceAdvertiserDelegate, MCNearbyServiceBrowserDelegate {
     @Published var chats: [String: Chat] = ["ОБЩИЙ ЧАТ": Chat(id: "ОБЩИЙ ЧАТ", isGroup: true, messages: [])]
     @Published var contacts: [String] = []
     @Published var name = UserDefaults.standard.string(forKey: "u_name") ?? ""
-    @AppStorage("ngrok_host") var host = "твой-адрес.ngrok-free.dev"
+    @AppStorage("ngrok_host") var host = "твой.ngrok-free.dev"
     @Published var peersCount = 0
-    @Published var isRecording = false
+    @Published var activeCall: String? = nil
     
-    var ws: URLSessionWebSocketTask?; var session: MCSession?; var adv: MCNearbyServiceAdvertiser?; var bro: MCNearbyServiceBrowser?; var recorder: AVAudioRecorder?
+    var ws: URLSessionWebSocketTask?; var session: MCSession?; var adv: MCNearbyServiceAdvertiser?; var bro: MCNearbyServiceBrowser?
+    var recorder: AVAudioRecorder?
 
     func setup(n: String) {
         self.name = n.lowercased(); UserDefaults.standard.set(n, forKey: "u_name")
@@ -35,52 +33,46 @@ class GlobalCore: NSObject, ObservableObject, MCSessionDelegate, MCNearbyService
         bro = MCNearbyServiceBrowser(peer: pid, serviceType: "hq-mesh"); bro?.delegate = self; bro?.startBrowsingForPeers()
         connect()
     }
-    
+
     func connect() {
-        let cleanHost = host.replacingOccurrences(of: "https://", with: "")
-        guard let url = URL(string: "wss://\(cleanHost)/ws") else { return }
+        let h = host.replacingOccurrences(of: "https://", with: "")
+        guard let url = URL(string: "wss://\(h)/ws") else { return }
         ws = URLSession.shared.webSocketTask(with: url); ws?.resume()
         sendPacket(["type": "register", "name": name]); listen()
     }
-    
+
     func listen() {
         ws?.receive { [weak self] res in
             guard let self = self, case .success(let m) = res, case .string(let s) = m, let d = s.data(using: .utf8), let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { self?.listen(); return }
             DispatchQueue.main.async {
-                let type = j["type"] as? String
-                if type == "contacts", let users = j["users"] as? [String] {
+                let t = j["type"] as? String
+                if t == "contacts", let users = j["users"] as? [String] {
                     self.contacts = users.filter { $0 != self.name }
                     for u in self.contacts where self.chats[u] == nil { self.chats[u] = Chat(id: u, isGroup: false, messages: []) }
-                } else if type == "msg", let sID = j["senderID"] as? String, sID != self.name {
-                    let target = j["target"] as? String ?? ""
-                    let isGroup = j["isGroup"] as? Bool ?? false
-                    let msg = Message(id: UUID(), text: j["text"] as? String ?? "", senderID: sID, target: target, isGroup: isGroup, type: MsgType(rawValue: j["msgType"] as? String ?? "text") ?? .text, url: j["url"] as? String, isMe: false, timestamp: Date())
-                    
-                    let chatKey = isGroup ? target : sID
-                    if self.chats[chatKey] == nil { self.chats[chatKey] = Chat(id: chatKey, isGroup: isGroup, messages: []) }
-                    self.chats[chatKey]?.messages.append(msg)
+                } else if t == "msg", let sID = j["senderID"] as? String, sID != self.name {
+                    let target = j["target"] as? String ?? ""; let isG = j["isGroup"] as? Bool ?? false
+                    let msg = Message(id: UUID(), text: j["text"] as? String ?? "", senderID: sID, target: target, isGroup: isG, type: MsgType(rawValue: j["msgType"] as? String ?? "text") ?? .text, url: j["url"] as? String, isMe: false)
+                    let key = isG ? target : sID
+                    if self.chats[key] == nil { self.chats[key] = Chat(id: key, isGroup: isG, messages: []) }
+                    self.chats[key]?.messages.append(msg)
                 }
             }
             self.listen()
         }
     }
-    
+
     func sendPacket(_ p: [String: Any]) { if let d = try? JSONSerialization.data(withJSONObject: p) { ws?.send(.string(String(data: d, encoding: .utf8)!)) { _ in } } }
-    
+
     func send(txt: String = "", type: MsgType = .text, url: String? = nil, target: String, isGroup: Bool) {
         let p: [String: Any] = ["type": "msg", "senderID": name, "target": target, "isGroup": isGroup, "text": txt, "msgType": type.rawValue, "url": url ?? ""]
         DispatchQueue.main.async {
-            let msg = Message(id: UUID(), text: txt, senderID: self.name, target: target, isGroup: isGroup, type: type, url: url, isMe: true, timestamp: Date())
-            if self.chats[target] == nil { self.chats[target] = Chat(id: target, isGroup: isGroup, messages: []) }
-            self.chats[target]?.messages.append(msg)
+            self.chats[target]?.messages.append(Message(id: UUID(), text: txt, senderID: self.name, target: target, isGroup: isGroup, type: type, url: url, isMe: true))
             self.sendPacket(p)
-            
-            // Mesh отправка
-            if let sess = self.session, let d = try? JSONSerialization.data(withJSONObject: p) { try? sess.send(d, toPeers: sess.connectedPeers, with: .reliable) }
+            if let s = self.session, let d = try? JSONSerialization.data(withJSONObject: p) { try? s.send(d, toPeers: s.connectedPeers, with: .reliable) }
         }
     }
 
-    func uploadMedia(data: Data, ext: String, type: MsgType, target: String, isGroup: Bool) {
+    func upload(data: Data, ext: String, type: MsgType, target: String, isGroup: Bool) {
         let url = URL(string: "https://\(host)/upload")!; var req = URLRequest(url: url); req.httpMethod = "POST"
         let b = UUID().uuidString; req.setValue("multipart/form-data; boundary=\(b)", forHTTPHeaderField: "Content-Type")
         var body = Data(); body.append("--\(b)\r\n".data(using: .utf8)!); body.append("Content-Disposition: form-data; name=\"file\"; filename=\"file.\(ext)\"\r\n\r\n".data(using: .utf8)!); body.append(data); body.append("\r\n--\(b)--\r\n".data(using: .utf8)!)
@@ -91,31 +83,16 @@ class GlobalCore: NSObject, ObservableObject, MCSessionDelegate, MCNearbyService
         }.resume()
     }
 
-    // Голосовые
-    func startVoice() {
-        try? AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: .default); try? AVAudioSession.sharedInstance().setActive(true)
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("rec.m4a")
-        recorder = try? AVAudioRecorder(url: url, settings: [AVFormatIDKey: Int(kAudioFormatMPEG4AAC), AVSampleRateKey: 12000.0, AVNumberOfChannelsKey: 1, AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue]); recorder?.record()
-        self.isRecording = true
-    }
-    func stopVoice(target: String, isGroup: Bool) {
-        recorder?.stop(); self.isRecording = false
-        if let u = recorder?.url, let d = try? Data(contentsOf: u) { uploadMedia(data: d, ext: "m4a", type: .voice, target: target, isGroup: isGroup) }
-    }
-
-    // Заглушки Mesh
+    // Mesh
     func session(_ s: MCSession, peer id: MCPeerID, didChange st: MCSessionState) { DispatchQueue.main.async { self.peersCount = s.connectedPeers.count } }
     func session(_ s: MCSession, didReceive d: Data, fromPeer id: MCPeerID) {
         if let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let sID = j["senderID"] as? String {
-            let target = j["target"] as? String ?? ""; let isGroup = j["isGroup"] as? Bool ?? false
-            // Если сообщение в группу, или адресовано МНЕ
-            if isGroup || target == self.name {
-                DispatchQueue.main.async {
-                    let chatKey = isGroup ? target : sID
-                    let msg = Message(id: UUID(), text: j["text"] as? String ?? "", senderID: sID, target: target, isGroup: isGroup, type: MsgType(rawValue: j["msgType"] as? String ?? "text") ?? .text, url: j["url"] as? String, isMe: false, timestamp: Date())
-                    if self.chats[chatKey] == nil { self.chats[chatKey] = Chat(id: chatKey, isGroup: isGroup, messages: []) }
-                    self.chats[chatKey]?.messages.append(msg)
-                }
+            DispatchQueue.main.async {
+                let target = j["target"] as? String ?? ""; let isG = j["isGroup"] as? Bool ?? false
+                let key = isG ? target : sID
+                let msg = Message(id: UUID(), text: j["text"] as? String ?? "", senderID: sID, target: target, isGroup: isG, type: .text, url: j["url"] as? String, isMe: false)
+                if self.chats[key] == nil { self.chats[key] = Chat(id: key, isGroup: isG, messages: []) }
+                self.chats[key]?.messages.append(msg)
             }
         }
     }
@@ -132,64 +109,41 @@ struct MainCoordinator: View {
     var body: some View {
         if core.name.isEmpty { LoginView(core: core) }
         else {
-            TabView {
-                ChatListView(core: core).tabItem { Label("Чаты", systemImage: "message.fill") }
-                ContactsView(core: core).tabItem { Label("Контакты", systemImage: "person.2.fill") }
-                SettingsView(core: core).tabItem { Label("Настройки", systemImage: "gearshape.fill") }
+            ZStack {
+                TabView {
+                    ChatListView(core: core).tabItem { Label("Чаты", systemImage: "message.fill") }
+                    ContactsView(core: core).tabItem { Label("Контакты", systemImage: "person.2.fill") }
+                    SettingsView(core: core).tabItem { Label("Настройки", systemImage: "gear") }
+                }
+                if let callUser = core.activeCall { CallView(user: callUser, core: core) }
             }
             .onAppear { core.setup(n: core.name) }
         }
     }
 }
 
-// СПИСОК ЧАТОВ
-struct ChatListView: View {
-    @ObservedObject var core: GlobalCore
+// ЭКРАН ЗВОНКА
+struct CallView: View {
+    let user: String; @ObservedObject var core: GlobalCore
     var body: some View {
-        NavigationView {
-            List(Array(core.chats.values), id: \.id) { chat in
-                NavigationLink(destination: ChatRoom(core: core, chatID: chat.id, isGroup: chat.isGroup)) {
-                    HStack(spacing: 15) {
-                        Circle().fill(chat.isGroup ? Color.blue : Color.green).frame(width: 50, height: 50)
-                            .overlay(Text(String(chat.id.prefix(1).uppercased())).foregroundColor(.white).font(.title2).bold())
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(chat.id.uppercased()).font(.headline)
-                            Text(chat.lastMessage).font(.subheadline).foregroundColor(.gray).lineLimit(1)
-                        }
-                    }
-                }
+        VStack {
+            Spacer()
+            Circle().fill(Color.gray).frame(width: 120, height: 120).overlay(Text(user.prefix(1).uppercased()).font(.largeTitle).foregroundColor(.white))
+            Text(user.uppercased()).font(.title).bold().padding()
+            Text("ЗВОНОК...").foregroundColor(.green).font(.headline)
+            Spacer()
+            HStack(spacing: 50) {
+                Button(action: { core.activeCall = nil }) { Image(systemName: "phone.down.fill").font(.system(size: 40)).foregroundColor(.red).padding(30).background(Color.white).clipShape(Circle()) }
+                Button(action: {}) { Image(systemName: "mic.fill").font(.system(size: 30)).foregroundColor(.gray).padding(20).background(Color.white).clipShape(Circle()) }
             }
-            .navigationTitle("Чаты")
-            .toolbar { ToolbarItem(placement: .navigationBarTrailing) { HStack { Circle().fill(core.peersCount>0 ? Color.green : Color.red).frame(width:10,height:10); Text(core.peersCount>0 ? "Mesh" : "Server").font(.caption).foregroundColor(.gray) } } }
-        }
+            Spacer()
+        }.background(Color.black.opacity(0.9).ignoresSafeArea())
     }
 }
 
-// КОНТАКТЫ
-struct ContactsView: View {
-    @ObservedObject var core: GlobalCore
-    var body: some View {
-        NavigationView {
-            List(core.contacts, id: \.self) { contact in
-                NavigationLink(destination: ChatRoom(core: core, chatID: contact, isGroup: false)) {
-                    HStack {
-                        Circle().fill(Color.orange).frame(width: 40, height: 40)
-                            .overlay(Text(String(contact.prefix(1).uppercased())).foregroundColor(.white).bold())
-                        Text(contact.uppercased()).font(.headline)
-                        Spacer()
-                        Text("в сети").font(.caption).foregroundColor(.green)
-                    }
-                }
-            }.navigationTitle("Контакты онлайн")
-        }
-    }
-}
-
-// КОМНАТА ЧАТА (ЛС ИЛИ ГРУППА)
 struct ChatRoom: View {
-    @ObservedObject var core: GlobalCore
-    let chatID: String; let isGroup: Bool
-    @State var txt = ""; @State var pick: PhotosPickerItem?
+    @ObservedObject var core: GlobalCore; let chatID: String; let isGroup: Bool
+    @State var txt = ""; @State var showCircles = false
     
     var body: some View {
         VStack(spacing: 0) {
@@ -198,50 +152,54 @@ struct ChatRoom: View {
                     VStack(spacing: 12) {
                         if let msgs = core.chats[chatID]?.messages { ForEach(msgs) { m in Bubble(m: m, isGroup: isGroup).id(m.id) } }
                     }.padding()
-                }.onChange(of: core.chats[chatID]?.messages.count) { _ in proxy.scrollTo(core.chats[chatID]?.messages.last?.id) }
+                }.onChange(of: core.chats[chatID]?.messages.count) { _ in withAnimation { proxy.scrollTo(core.chats[chatID]?.messages.last?.id) } }
             }
             
-            // Input Bar
             HStack(spacing: 12) {
-                PhotosPicker(selection: $pick, matching: .images) { Image(systemName: "paperclip").font(.title2).foregroundColor(.gray) }
-                .onChange(of: pick) { n in Task { if let d = try? await n?.loadTransferable(type: Data.self) { core.uploadMedia(data: d, ext: "jpg", type: .image, target: chatID, isGroup: isGroup) } } }
-                
+                Button(action: { showCircles.toggle() }) { Image(systemName: "play.circle.fill").font(.title).foregroundColor(.blue) }
                 TextField("Сообщение...", text: $txt).padding(10).background(Color(UIColor.systemGray6)).cornerRadius(20)
-                
-                if txt.isEmpty {
-                    Image(systemName: "mic.fill").font(.title2).foregroundColor(core.isRecording ? .red : .blue)
-                        .scaleEffect(core.isRecording ? 1.5 : 1.0).animation(.spring(), value: core.isRecording)
-                        .gesture(DragGesture(minimumDistance: 0).onChanged { _ in if !core.isRecording { core.startVoice() } }.onEnded { _ in core.stopVoice(target: chatID, isGroup: isGroup) })
-                } else {
-                    Button(action: { core.send(txt: txt, target: chatID, isGroup: isGroup); txt = "" }) { Image(systemName: "arrow.up.circle.fill").font(.system(size: 32)).foregroundColor(.blue) }
-                }
+                Button(action: { if !txt.isEmpty { core.send(txt: txt, target: chatID, isGroup: isGroup); txt = "" } }) { Image(systemName: "paperplane.fill").font(.title2) }
             }.padding()
         }
         .navigationTitle(chatID.uppercased())
-        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            HStack {
-                Button(action: { core.send(txt: "☎️ Входящий видеозвонок (В разработке)", type: .call, target: chatID, isGroup: isGroup) }) { Image(systemName: "video.fill") }
-                Button(action: { core.send(txt: "📞 Входящий аудиозвонок (В разработке)", type: .call, target: chatID, isGroup: isGroup) }) { Image(systemName: "phone.fill") }
-            }
+            Button(action: { core.activeCall = chatID }) { Image(systemName: "video.fill") }
+        }
+        .sheet(isPresented: $showCircles) { CircleRecorder(core: core, target: chatID, isGroup: isGroup) }
+    }
+}
+
+// КРУЖОЧКИ (ВИДЕО)
+struct CircleRecorder: View {
+    @ObservedObject var core: GlobalCore; let target: String; let isGroup: Bool
+    @Environment(\.presentationMode) var pm
+    var body: some View {
+        VStack {
+            Text("Запись кружочка").font(.headline).padding()
+            Circle().fill(Color.black).frame(width: 250, height: 250).overlay(Text("КАМЕРА").foregroundColor(.white))
+            Text("Удерживай кнопку для записи").font(.caption).padding()
+            Button(action: {
+                // Имитация записи кружочка
+                core.send(txt: "🎥 Видео-кружочек", type: .circle, url: "https://www.w3schools.com/html/mov_bbb.mp4", target: target, isGroup: isGroup)
+                pm.wrappedValue.dismiss()
+            }) {
+                Circle().fill(Color.red).frame(width: 80, height: 80).shadow(radius: 5)
+            }.padding(40)
         }
     }
 }
 
-// ПУЗЫРЬ СООБЩЕНИЯ
 struct Bubble: View {
     let m: Message; let isGroup: Bool
     var body: some View {
         HStack {
             if m.isMe { Spacer() }
-            VStack(alignment: m.isMe ? .trailing : .leading, spacing: 4) {
-                if isGroup && !m.isMe { Text(m.senderID.uppercased()).font(.caption2).foregroundColor(.blue).bold() }
+            VStack(alignment: m.isMe ? .trailing : .leading) {
+                if isGroup && !m.isMe { Text(m.senderID).font(.caption2).bold().foregroundColor(.blue) }
                 
-                if m.type == .call {
-                    HStack { Image(systemName: "phone.arrow.down.left"); Text(m.text) }.padding(12).background(Color.green.opacity(0.2)).cornerRadius(12)
-                } else if let u = m.url {
-                    if m.type == .image { AsyncImage(url: URL(string: u)) { i in i.resizable().scaledToFit().cornerRadius(12) } placeholder: { ProgressView() }.frame(width: 220) }
-                    else if m.type == .voice { HStack { Image(systemName: "play.circle.fill"); Text("Голосовое сообщение") }.padding(12).background(m.isMe ? Color.blue.opacity(0.8) : Color.gray.opacity(0.2)).foregroundColor(m.isMe ? .white : .primary).cornerRadius(16) }
+                if m.type == .circle {
+                    VideoPlayer(player: AVPlayer(url: URL(string: m.url ?? "")!))
+                        .frame(width: 200, height: 200).clipShape(Circle()).overlay(Circle().stroke(Color.blue, lineWidth: 2))
                 } else {
                     Text(m.text).padding(12).background(m.isMe ? Color.blue : Color(UIColor.systemGray5)).foregroundColor(m.isMe ? .white : .primary).cornerRadius(18)
                 }
@@ -251,27 +209,50 @@ struct Bubble: View {
     }
 }
 
-struct SettingsView: View {
-    @ObservedObject var core: GlobalCore; @State var tempHost = ""
+// Остальные вспомогательные вью (ChatListView, ContactsView и т.д. остаются как в v12.0)
+struct ChatListView: View {
+    @ObservedObject var core: GlobalCore
     var body: some View {
         NavigationView {
-            Form {
-                Section(header: Text("Подключение к серверу (Ngrok)")) { TextField("elevation-...ngrok-free.dev", text: $tempHost); Button("Сохранить и перезайти") { core.host = tempHost; core.connect() } }
-                Section(header: Text("Твой профиль")) { Text("Никнейм: \(core.name.uppercased())") }
-                Section(header: Text("Сеть")) { Text("Узлов Mesh рядом: \(core.peersCount)").foregroundColor(core.peersCount > 0 ? .green : .gray) }
-            }.navigationTitle("Настройки").onAppear { tempHost = core.host }
+            List(Array(core.chats.values), id: \.id) { chat in
+                NavigationLink(destination: ChatRoom(core: core, chatID: chat.id, isGroup: chat.isGroup)) {
+                    HStack {
+                        Circle().fill(chat.isGroup ? Color.blue : Color.green).frame(width: 45, height: 45).overlay(Text(chat.id.prefix(1).uppercased()).foregroundColor(.white))
+                        VStack(alignment: .leading) { Text(chat.id.uppercased()).bold(); Text(chat.lastMsg).font(.caption).foregroundColor(.gray).lineLimit(1) }
+                    }
+                }
+            }.navigationTitle("TG Global")
         }
     }
 }
-
+struct ContactsView: View {
+    @ObservedObject var core: GlobalCore
+    var body: some View {
+        NavigationView {
+            List(core.contacts, id: \.self) { c in
+                NavigationLink(destination: ChatRoom(core: core, chatID: c, isGroup: false)) { Text(c.uppercased()) }
+            }.navigationTitle("Контакты")
+        }
+    }
+}
+struct SettingsView: View {
+    @ObservedObject var core: GlobalCore; @State var h = ""
+    var body: some View {
+        NavigationView {
+            Form {
+                Section("Сервер") { TextField("Ngrok", text: $h); Button("Сохранить") { core.host = h; core.connect() } }
+                Section("Инфо") { Text("Имя: \(core.name)"); Text("Mesh узлов: \(core.peersCount)") }
+            }.navigationTitle("Настройки").onAppear { h = core.host }
+        }
+    }
+}
 struct LoginView: View {
     @ObservedObject var core: GlobalCore; @State var n = ""
     var body: some View {
         VStack(spacing: 20) {
             Image(systemName: "paperplane.fill").font(.system(size: 80)).foregroundColor(.blue)
-            Text("TG Global").font(.largeTitle).bold()
-            TextField("Твой ник (stepan, sergey, lena)", text: $n).textFieldStyle(.roundedBorder).padding(.horizontal, 40)
-            Button("Войти") { if !n.isEmpty { core.setup(n: n) } }.buttonStyle(.borderedProminent).controlSize(.large)
+            TextField("Никнейм", text: $n).textFieldStyle(.roundedBorder).padding(.horizontal, 50)
+            Button("Войти") { core.setup(n: n) }.buttonStyle(.borderedProminent)
         }
     }
 }
