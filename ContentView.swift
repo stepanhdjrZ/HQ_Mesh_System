@@ -1,187 +1,200 @@
 import SwiftUI
 import AVKit
 
-// MARK: - Главный экран (Telegram Style)
+// MARK: - Главная тема HQ
+struct HQTheme {
+    static let accent = Color.blue
+    static let background = Color(.systemBackground)
+    static let secondaryBackground = Color(.systemGray6)
+}
+
 struct ContentView: View {
-    @State private var searchText = ""
-    @State private var isMeshActive = true // Статус нашего Mesh-узла
+    @State private var selectedTab = 0
+    @State private var meshActive = true
     
     var body: some View {
-        NavigationView {
-            VStack(spacing: 0) {
-                // Наш "Радар" / Статус сети
-                MeshStatusHeader(isActive: $isMeshActive)
-                
-                // Список чатов
-                List {
-                    // Пример чата (в будущем подтянем из базы твоего Ryzen)
-                    NavigationLink(destination: ChatDetailView(userName: "Степан (Founder)")) {
-                        ChatRow(name: "Степан (Founder)", 
-                                lastMessage: "Mesh-узлы работают стабильно 🛰️", 
-                                time: "22:41", 
-                                isOnline: true)
-                    }
+        TabView(selection: $selectedTab) {
+            NavigationView {
+                VStack(spacing: 0) {
+                    // Наш Радар (Mesh Status)
+                    MeshRadarHeader(isActive: $meshActive)
                     
-                    ChatRow(name: "HQ System", 
-                            lastMessage: "Добро пожаловать в децентрализованную сеть.", 
-                            time: "Вчера", 
-                            isOnline: false)
+                    List {
+                        ChatRowView(name: "Степан (Founder)", message: "Mesh-узлы активны 🛰️", time: "23:10", isOnline: true)
+                        ChatRowView(name: "HQ Beta Tester", message: "Кружочек записан!", time: "22:05", isOnline: false)
+                    }
+                    .listStyle(PlainListStyle())
                 }
-                .listStyle(PlainListStyle())
+                .navigationTitle("HQ Messenger")
+                .navigationBarItems(trailing: Image(systemName: "plus.circle").foregroundColor(HQTheme.accent))
             }
-            .navigationTitle("HQ Messenger")
-            .navigationBarItems(trailing: Image(systemName: "square.and.pencil"))
+            .tabItem { Image(systemName: "message.fill"); Text("Чаты") }.tag(0)
+            
+            Text("Настройки Сети").tabItem { Image(systemName: "antenna.radiowaves.left.and.right"); Text("Mesh") }.tag(1)
         }
     }
 }
 
-// MARK: - Компонент строки чата
-struct ChatRow: View {
-    let name: String
-    let lastMessage: String
-    let time: String
-    let isOnline: Bool
+// MARK: - Меш-Радар
+struct MeshRadarHeader: View {
+    @Binding var isActive: Bool
+    @State private var pulse = false
     
     var body: some View {
-        HStack(spacing: 15) {
-            ZStack(alignment: .bottomTrailing) {
+        HStack {
+            ZStack {
                 Circle()
-                    .fill(LinearGradient(colors: [.blue, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
-                    .frame(width: 55, height: 55)
-                
-                if isOnline {
-                    Circle()
-                        .fill(Color.green)
-                        .frame(width: 12, height: 12)
-                        .overlay(Circle().stroke(Color.white, lineWidth: 2))
-                }
+                    .fill(isActive ? Color.green : Color.red)
+                    .frame(width: 10, height: 10)
+                    .scaleEffect(pulse ? 1.5 : 1.0)
+                    .opacity(pulse ? 0 : 1)
             }
+            .onAppear { withAnimation(Animation.easeInOut(duration: 1).repeatForever(autoreverses: false)) { pulse.toggle() } }
             
-            VStack(alignment: .leading, spacing: 5) {
-                HStack {
-                    Text(name).bold()
-                    Spacer()
-                    Text(time).font(.caption).foregroundColor(.gray)
-                }
-                Text(lastMessage)
-                    .font(.subheadline)
-                    .foregroundColor(.gray)
-                    .lineLimit(1)
-            }
+            Text(isActive ? "Связь через Ryzen 7 (Mesh OK)" : "Поиск узлов...")
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+            
+            Spacer()
+            
+            Text("50 ₽/мес").font(.caption2).padding(4).background(Color.blue.opacity(0.1)).cornerRadius(5)
         }
-        .padding(.vertical, 5)
+        .padding(.horizontal)
+        .padding(.vertical, 10)
+        .background(HQTheme.secondaryBackground)
     }
 }
 
-// MARK: - Экран чата (Кружочки и сообщения)
+// MARK: - Экран Чата (Кружочки и Войсы)
 struct ChatDetailView: View {
-    let userName: String
     @State private var messageText = ""
+    @State private var isRecording = false
     
     var body: some View {
         VStack {
             ScrollView {
-                VStack(spacing: 15) {
-                    // Пример кружочка (Video Message)
-                    VideoCirclePreview()
+                VStack(spacing: 20) {
+                    // Пример кружочка
+                    VideoCircleMessage(isMy: false)
                     
-                    MessageBubble(text: "Привет! Как там наш сервер на Ryzen?", isMy: false)
-                    MessageBubble(text: "Всё супер, 9800X3D перемалывает пакеты мгновенно!", isMy: true)
+                    // Пример войса
+                    VoiceMessageBubble(isMy: true)
+                    
+                    MessageBubble(text: "На M4 и Ryzen всё летает!", isMy: true)
                 }
                 .padding()
             }
             
             // Панель ввода (Telegram Style)
-            HStack(spacing: 15) {
-                Button(action: {}) { Image(systemName: "paperclip") }
+            HStack(spacing: 12) {
+                Button(action: {}) { Image(systemName: "paperclip").font(.title3) }
                 
                 TextField("Сообщение", text: $messageText)
                     .padding(10)
-                    .background(Color(.systemGray6))
+                    .background(HQTheme.secondaryBackground)
                     .cornerRadius(20)
                 
-                // Если текста нет — показываем микрофон (голосовые) или камеру (кружочки)
                 if messageText.isEmpty {
-                    Button(action: {}) { Image(systemName: "mic").font(.title3) }
-                    Button(action: {}) { Image(systemName: "camera").font(.title3) }
+                    Button(action: { isRecording.toggle() }) {
+                        Image(systemName: isRecording ? "stop.circle.fill" : "mic.fill")
+                            .font(.title2)
+                            .foregroundColor(isRecording ? .red : HQTheme.accent)
+                    }
+                    Button(action: {}) {
+                        Image(systemName: "camera.fill")
+                            .font(.title2)
+                    }
                 } else {
-                    Button(action: {}) { Image(systemName: "arrow.up.circle.fill").font(.title) }
+                    Button(action: {}) {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 32))
+                            .foregroundColor(HQTheme.accent)
+                    }
                 }
             }
             .padding()
-            .background(Color(.systemBackground))
-        }
-        .navigationBarTitle(userName, displayMode: .inline)
-    }
-}
-
-// MARK: - Тот самый Кружочек (UI часть)
-struct VideoCirclePreview: View {
-    var body: some View {
-        HStack {
-            Spacer()
-            ZStack {
-                Circle()
-                    .stroke(Color.blue, lineWidth: 3)
-                    .frame(width: 150, height: 150)
-                
-                // Тут будет плеер видео AVPlayer
-                Image(systemName: "person.circle.fill")
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: 145, height: 145)
-                    .clipShape(Circle())
-                
-                VStack {
-                    Spacer()
-                    Text("0:08").font(.caption2).padding(4).background(Color.black.opacity(0.5)).cornerRadius(5).foregroundColor(.white)
-                }.padding(.bottom, 10)
-            }
         }
     }
 }
 
-// MARK: - Бабл сообщения
-struct MessageBubble: some View {
-    let text: String
+// MARK: - Компонент: Кружочек
+struct VideoCircleMessage: View {
     let isMy: Bool
-    
     var body: some View {
         HStack {
             if isMy { Spacer() }
-            Text(text)
-                .padding(12)
-                .background(isMy ? Color.blue : Color(.systemGray5))
-                .foregroundColor(isMy ? .white : .black)
-                .cornerRadius(18)
+            ZStack(alignment: .bottom) {
+                Circle()
+                    .stroke(HQTheme.accent, lineWidth: 2)
+                    .frame(width: 160, height: 160)
+                
+                // Заглушка видео
+                Image(systemName: "person.crop.circle.fill.badge.plus")
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 155, height: 155)
+                    .clipShape(Circle())
+                    .foregroundColor(.gray)
+                
+                Text("0:05")
+                    .font(.caption2)
+                    .padding(4)
+                    .background(Color.black.opacity(0.6))
+                    .cornerRadius(5)
+                    .foregroundColor(.white)
+                    .padding(.bottom, 8)
+            }
             if !isMy { Spacer() }
         }
     }
 }
 
-// MARK: - Хедер статуса Mesh (Радар)
-struct MeshStatusHeader: View {
-    @Binding var isActive: Bool
-    
+// MARK: - Компонент: Голосовое
+struct VoiceMessageBubble: View {
+    let isMy: Bool
     var body: some View {
         HStack {
-            Circle()
-                .fill(isActive ? Color.green : Color.red)
-                .frame(width: 10, height: 10)
-                .shadow(color: isActive ? .green : .red, radius: 4)
-            
-            Text(isActive ? "Mesh: Активен (1 узел рядом)" : "Mesh: Поиск узлов...")
-                .font(.caption)
-                .bold()
-            
-            Spacer()
-            
-            if !isActive {
-                ProgressView().scaleEffect(0.7)
+            if isMy { Spacer() }
+            HStack(spacing: 10) {
+                Image(systemName: "play.fill")
+                Rectangle() // Упрощенная волна
+                    .fill(isMy ? Color.white.opacity(0.5) : Color.blue.opacity(0.5))
+                    .frame(width: 100, height: 20)
+                Text("0:12")
+            }
+            .padding(12)
+            .background(isMy ? HQTheme.accent : HQTheme.secondaryBackground)
+            .foregroundColor(isMy ? .white : .primary)
+            .cornerRadius(18)
+            if !isMy { Spacer() }
+        }
+    }
+}
+
+// Вспомогательные компоненты для списка
+struct ChatRowView: View {
+    let name: String; let message: String; let time: String; let isOnline: Bool
+    var body: some View {
+        NavigationLink(destination: ChatDetailView()) {
+            HStack {
+                Circle().fill(Color.gray.opacity(0.3)).frame(width: 50, height: 50)
+                VStack(alignment: .leading) {
+                    Text(name).bold()
+                    Text(message).font(.subheadline).foregroundColor(.gray).lineLimit(1)
+                }
+                Spacer()
+                Text(time).font(.caption).foregroundColor(.gray)
             }
         }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-        .background(Color(.systemGray6))
+    }
+}
+
+struct MessageBubble: View {
+    let text: String; let isMy: Bool
+    var body: some View {
+        HStack {
+            if isMy { Spacer() }
+            Text(text).padding(12).background(isMy ? HQTheme.accent : HQTheme.secondaryBackground).foregroundColor(isMy ? .white : .primary).cornerRadius(18)
+            if !isMy { Spacer() }
+        }
     }
 }
