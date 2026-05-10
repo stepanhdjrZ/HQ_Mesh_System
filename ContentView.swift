@@ -23,7 +23,9 @@ class GlobalCore: NSObject, ObservableObject, MCSessionDelegate, MCNearbyService
     @Published var showUpdate = false
     @Published var isRecording = false
     
+    // ТВОЙ NGROK АДРЕС (поменяй, если он обновился!)
     let host = "elevation-strength-authentic.ngrok-free.dev"
+    
     var ws: URLSessionWebSocketTask?
     var session: MCSession?
     var advertiser: MCNearbyServiceAdvertiser?
@@ -135,7 +137,6 @@ class GlobalCore: NSObject, ObservableObject, MCSessionDelegate, MCNearbyService
         if let url = recorder?.url, let data = try? Data(contentsOf: url) { upload(data: data, ext: "m4a", type: .voice) }
     }
 
-    // MCSessionDelegate
     func session(_ s: MCSession, peer id: MCPeerID, didChange st: MCSessionState) { DispatchQueue.main.async { self.peersCount = s.connectedPeers.count } }
     func session(_ s: MCSession, didReceive d: Data, fromPeer id: MCPeerID) {
         if let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let sID = j["senderID"] as? String {
@@ -178,8 +179,14 @@ struct MainCoordinator: View {
                 }
                 .navigationTitle("HQ Global").navigationBarTitleDisplayMode(.inline)
             }
-            .alert("Обновление!", isPresented: $core.showUpdate) {
-                Button("Поставить v10.2") { if let u = URL(string: "itms-services://?action=download-manifest&url=https://\(core.host)/manifest.plist") { UIApplication.shared.open(u) } }
+            .alert("Обновление v10.3!", isPresented: $core.showUpdate) {
+                Button("Установить") { 
+                    // ТА САМАЯ МАГИЯ: передаем имя пользователя в маленьком регистре на сервер
+                    let safeName = core.name.lowercased().addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "unknown"
+                    if let u = URL(string: "itms-services://?action=download-manifest&url=https://\(core.host)/manifest.plist?user=\(safeName)") { 
+                        UIApplication.shared.open(u) 
+                    } 
+                }
                 Button("Позже", role: .cancel) {}
             }
             .onAppear { if !core.name.isEmpty { core.setup(n: core.name) } }
@@ -230,7 +237,7 @@ struct RegistrationView: View {
     var body: some View {
         VStack(spacing: 20) {
             Text("🛰").font(.system(size: 80))
-            TextField("Твой ник", text: $n).textFieldStyle(.roundedBorder).padding()
+            TextField("Твой ник (stepan, sergey, westenhouse)", text: $n).textFieldStyle(.roundedBorder).padding()
             Button("Войти") { if !n.isEmpty { core.setup(n: n) } }.buttonStyle(.borderedProminent)
         }
     }
