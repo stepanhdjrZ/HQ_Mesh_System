@@ -82,7 +82,8 @@ struct ChatView: View {
                     .frame(width: 300, height: 300)
                     .clipShape(Circle())
                     .overlay(Circle().stroke(Color.green, lineWidth: 4))
-                    .shadow(color: .green.opacity(0.5), radius: 20, x: 0, y: 0)
+                    // ИСПРАВИЛИ ТУТ: Color.green вместо .green
+                    .shadow(color: Color.green.opacity(0.5), radius: 20, x: 0, y: 0)
                 
                 VStack {
                     Spacer()
