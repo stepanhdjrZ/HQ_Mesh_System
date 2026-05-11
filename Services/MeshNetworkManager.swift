@@ -10,7 +10,6 @@ struct ChatMessage: Identifiable {
 class MeshNetworkManager: NSObject, ObservableObject {
     @Published var isConnected = false
     @Published var messages: [ChatMessage] = []
-    
     private var webSocket: URLSessionWebSocketTask?
     
     override init() {
@@ -19,8 +18,8 @@ class MeshNetworkManager: NSObject, ObservableObject {
     }
     
     func connectToRyzen() {
-        // Подключаемся к внешнему IP
-        let url = URL(string: "ws://95.85.243.118:8080/ws")!
+        // ИСПОЛЬЗУЕМ ЛОКАЛЬНЫЙ IP ДЛЯ ПРОВЕРКИ
+        let url = URL(string: "ws://192.168.0.55:8080/ws")!
         let session = URLSession(configuration: .default)
         webSocket = session.webSocketTask(with: url)
         webSocket?.resume()
@@ -36,7 +35,11 @@ class MeshNetworkManager: NSObject, ObservableObject {
     
     func sendMessage(_ text: String) {
         let msgJSON = "{\"type\": \"msg\", \"text\": \"\(text)\"}"
-        webSocket?.send(.string(msgJSON)) { _ in }
+        webSocket?.send(.string(msgJSON)) { _ in 
+            DispatchQueue.main.async {
+                self.messages.append(ChatMessage(text: text, isMe: true))
+            }
+        }
     }
     
     private func listen() {
@@ -46,8 +49,6 @@ class MeshNetworkManager: NSObject, ObservableObject {
                 if case .string(let text) = msg { self?.parse(text) }
             case .failure: 
                 DispatchQueue.main.async { self?.isConnected = false }
-                // Попытка переподключения через 5 секунд
-                DispatchQueue.global().asyncAfter(deadline: .now() + 5) { self?.connectToRyzen() }
                 return
             }
             self?.listen()
@@ -61,7 +62,10 @@ class MeshNetworkManager: NSObject, ObservableObject {
               let msgText = json["text"] as? String else { return }
         
         DispatchQueue.main.async {
-            self.messages.append(ChatMessage(text: msgText, isMe: false))
+            // Проверяем, не наше ли это сообщение, чтобы не дублировать
+            if self.messages.last?.text != msgText {
+                self.messages.append(ChatMessage(text: msgText, isMe: false))
+            }
         }
     }
 }
