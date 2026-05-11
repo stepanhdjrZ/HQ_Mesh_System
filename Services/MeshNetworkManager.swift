@@ -18,13 +18,17 @@ class MeshNetworkManager: NSObject, ObservableObject {
     }
     
     func connectToRyzen() {
-        // ИСПОЛЬЗУЕМ ЛОКАЛЬНЫЙ IP ДЛЯ ПРОВЕРКИ
-        let url = URL(string: "ws://192.168.0.55:8080/ws")!
+        // 🔥 ГЛОБАЛЬНЫЙ СЕРВЕР HQ MESH 🔥
+        // wss:// означает защищенный WebSocket (работает через Cloudflare)
+        let url = URL(string: "wss://hq-mesh.site/ws")!
         let session = URLSession(configuration: .default)
         webSocket = session.webSocketTask(with: url)
         webSocket?.resume()
         
-        let registerMsg = "{\"type\": \"register\", \"name\": \"\(UIDevice.current.name)\"}"
+        // Автоматически берем имя айфона (например "iPhone 15 Pro Max Степана")
+        let deviceName = UIDevice.current.name
+        let registerMsg = "{\"type\": \"register\", \"name\": \"\(deviceName)\"}"
+        
         webSocket?.send(.string(registerMsg)) { error in
             if error == nil {
                 DispatchQueue.main.async { self.isConnected = true }
@@ -47,11 +51,16 @@ class MeshNetworkManager: NSObject, ObservableObject {
             switch result {
             case .success(let msg):
                 if case .string(let text) = msg { self?.parse(text) }
+                self?.listen() // Продолжаем слушать после успеха
+                
             case .failure: 
                 DispatchQueue.main.async { self?.isConnected = false }
+                // 🛡 ЗАЩИТА ОТ РАЗРЫВОВ (ПЕРЕПОДКЛЮЧЕНИЕ ЧЕРЕЗ 3 СЕКУНДЫ)
+                DispatchQueue.global().asyncAfter(deadline: .now() + 3.0) {
+                    self?.connectToRyzen()
+                }
                 return
             }
-            self?.listen()
         }
     }
     
