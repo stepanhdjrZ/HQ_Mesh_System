@@ -15,6 +15,7 @@ jobs:
           HQApp.swift \
           Views/ContentView.swift \
           Views/ChatView.swift \
+          Views/CameraView.swift \
           Services/MeshNetworkManager.swift \
           -target arm64-apple-ios17.0 \
           -sdk $(xcrun --show-sdk-path --sdk iphoneos) \
