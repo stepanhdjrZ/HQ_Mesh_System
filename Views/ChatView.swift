@@ -3,38 +3,108 @@ import SwiftUI
 struct ChatView: View {
     let contactName: String
     @State private var text = ""
+    @State private var showCamera = false // Триггер для вызова камеры
     
     var body: some View {
-        VStack {
-            ScrollView {
-                // Здесь будут наши кружочки и сообщения
-                Text("Начало переписки. Шифрование активно.").font(.caption).foregroundColor(.gray).padding()
-            }
+        ZStack {
+            // Премиальный темный фон с легким свечением
+            Color.black.edgesIgnoringSafeArea(.all)
+            LinearGradient(gradient: Gradient(colors: [Color.blue.opacity(0.15), Color.black]), startPoint: .topLeading, endPoint: .bottomTrailing)
+                .edgesIgnoringSafeArea(.all)
             
-            // Панель ввода
-            HStack {
-                Button(action: {}) { Image(systemName: "paperclip").font(.title2) }
-                
-                TextField("Сообщение...", text: $text)
-                    .padding(10)
-                    .background(Color(.systemGray6))
-                    .cornerRadius(20)
-                
-                if text.isEmpty {
-                    Button(action: {}) { Image(systemName: "mic").font(.title2) }
-                    Button(action: {}) { Image(systemName: "camera").font(.title2) }
-                } else {
-                    Button(action: {}) { Image(systemName: "arrow.up.circle.fill").font(.title) }
+            VStack {
+                ScrollView {
+                    // Имитация системного сообщения о шифровании
+                    HStack {
+                        Spacer()
+                        Text("Mesh-соединение установлено. Трафик зашифрован.")
+                            .font(.caption2)
+                            .bold()
+                            .padding(10)
+                            .background(Color.green.opacity(0.15))
+                            .foregroundColor(.green)
+                            .cornerRadius(15)
+                        Spacer()
+                    }
+                    .padding(.top)
                 }
+                
+                // Панель ввода (эффект матового стекла)
+                HStack(spacing: 15) {
+                    Button(action: { /* Позже добавим выбор файлов */ }) {
+                        Image(systemName: "paperclip").font(.title2).foregroundColor(.gray)
+                    }
+                    
+                    TextField("HQ Сообщение...", text: $text)
+                        .padding(12)
+                        .background(Color.white.opacity(0.1))
+                        .cornerRadius(20)
+                        .foregroundColor(.white)
+                    
+                    if text.isEmpty {
+                        Button(action: { /* Позже добавим запись звука */ }) {
+                            Image(systemName: "mic.fill").font(.title2).foregroundColor(.white)
+                        }
+                        // Кнопка кружочков теперь открывает окно!
+                        Button(action: { showCamera = true }) {
+                            Image(systemName: "video.bubble.fill").font(.title2).foregroundColor(.green)
+                        }
+                    } else {
+                        Button(action: { /* Отправка на Ryzen */ }) {
+                            Image(systemName: "arrow.up.circle.fill").font(.system(size: 32)).foregroundColor(.blue)
+                        }
+                    }
+                }
+                .padding()
+                .background(.ultraThinMaterial) // Тот самый дорогой блюр
+                .cornerRadius(35)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 5)
             }
-            .padding()
         }
         .navigationTitle(contactName)
         .navigationBarTitleDisplayMode(.inline)
-        // Кнопки звонков сверху
-        .navigationBarItems(trailing: HStack(spacing: 15) {
-            Button(action: { /* Аудиозвонок */ }) { Image(systemName: "phone") }
-            Button(action: { /* Видеозвонок */ }) { Image(systemName: "video") }
+        // Делаем верхнюю панель черной, чтобы сочеталось с фоном
+        .toolbarColorScheme(.dark, for: .navigationBar)
+        .toolbarBackground(Color.black, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .navigationBarItems(trailing: HStack(spacing: 20) {
+            Button(action: { /* WebRTC Аудио */ }) { Image(systemName: "phone.fill").foregroundColor(.white) }
+            Button(action: { /* WebRTC Видео */ }) { Image(systemName: "video.fill").foregroundColor(.white) }
         })
+        // Всплывающее окно камеры
+        .sheet(isPresented: $showCamera) {
+            MockCameraScreen()
+        }
+    }
+}
+
+// Временный экран, который докажет, что переход работает
+struct MockCameraScreen: View {
+    @Environment(\.presentationMode) var presentationMode
+    
+    var body: some View {
+        ZStack {
+            Color.black.edgesIgnoringSafeArea(.all)
+            VStack(spacing: 20) {
+                Image(systemName: "camera.aperture")
+                    .font(.system(size: 80))
+                    .foregroundColor(.green)
+                Text("Инициализация камеры...")
+                    .font(.title2)
+                    .foregroundColor(.white)
+                    .bold()
+                
+                Button(action: {
+                    presentationMode.wrappedValue.dismiss()
+                }) {
+                    Text("Закрыть модуль")
+                        .padding()
+                        .background(Color.white.opacity(0.2))
+                        .foregroundColor(.white)
+                        .cornerRadius(15)
+                }
+            }
+        }
     }
 }
