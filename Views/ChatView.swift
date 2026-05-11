@@ -45,12 +45,12 @@ struct ChatView: View {
                         Button(action: { /* Позже добавим запись звука */ }) {
                             Image(systemName: "mic.fill").font(.title2).foregroundColor(.white)
                         }
-                        // Кнопка кружочков теперь открывает окно!
+                        // Кнопка кружочков теперь открывает окно камеры!
                         Button(action: { showCamera = true }) {
                             Image(systemName: "video.bubble.fill").font(.title2).foregroundColor(.green)
                         }
                     } else {
-                        Button(action: { /* Отправка на Ryzen */ }) {
+                        Button(action: { /* Отправка на сервер */ }) {
                             Image(systemName: "arrow.up.circle.fill").font(.system(size: 32)).foregroundColor(.blue)
                         }
                     }
@@ -74,35 +74,24 @@ struct ChatView: View {
         })
         // Всплывающее окно камеры
         .sheet(isPresented: $showCamera) {
-            MockCameraScreen()
-        }
-    }
-}
-
-// Временный экран, который докажет, что переход работает
-struct MockCameraScreen: View {
-    @Environment(\.presentationMode) var presentationMode
-    
-    var body: some View {
-        ZStack {
-            Color.black.edgesIgnoringSafeArea(.all)
-            VStack(spacing: 20) {
-                Image(systemName: "camera.aperture")
-                    .font(.system(size: 80))
-                    .foregroundColor(.green)
-                Text("Инициализация камеры...")
-                    .font(.title2)
-                    .foregroundColor(.white)
-                    .bold()
+            ZStack {
+                Color.black.edgesIgnoringSafeArea(.all)
                 
-                Button(action: {
-                    presentationMode.wrappedValue.dismiss()
-                }) {
-                    Text("Закрыть модуль")
-                        .padding()
-                        .background(Color.white.opacity(0.2))
-                        .foregroundColor(.white)
-                        .cornerRadius(15)
+                // Вызываем нашу настоящую фронтальную камеру и обрезаем в круг
+                RealCameraScreen()
+                    .frame(width: 300, height: 300)
+                    .clipShape(Circle())
+                    .overlay(Circle().stroke(Color.green, lineWidth: 4))
+                    .shadow(color: .green.opacity(0.5), radius: 20, x: 0, y: 0)
+                
+                VStack {
+                    Spacer()
+                    Button(action: { showCamera = false }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 40))
+                            .foregroundColor(.white)
+                    }
+                    .padding(.bottom, 30)
                 }
             }
         }
