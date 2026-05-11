@@ -1,45 +1,58 @@
 name: Build HQ God Mode
+
 on: [push]
+
 jobs:
   build:
     runs-on: macos-latest
+
     steps:
       - uses: actions/checkout@v4
+
       - name: Compile
         run: |
-          xcrun --sdk iphoneos swiftc ContentView.swift \
-            -target arm64-apple-ios17.0 \
-            -sdk $(xcrun --show-sdk-path --sdk iphoneos) \
-            -swift-version 5 \
-            -parse-as-library \
-            -framework SwiftUI \
-            -framework UIKit \
-            -framework AVFoundation \
-            -framework PhotosUI \
-            -framework MultipeerConnectivity \
-            -emit-executable -o Messenger
+          xcrun --sdk iphoneos swiftc \
+          HQApp.swift \
+          Views/ContentView.swift \
+          Views/ChatView.swift \
+          Services/MeshNetworkManager.swift \
+          -target arm64-apple-ios17.0 \
+          -sdk $(xcrun --show-sdk-path --sdk iphoneos) \
+          -swift-version 5 \
+          -parse-as-library \
+          -framework SwiftUI \
+          -framework UIKit \
+          -framework AVFoundation \
+          -framework PhotosUI \
+          -framework MultipeerConnectivity \
+          -emit-executable -o Messenger
+
       - name: Assemble
         run: |
           mkdir -p Payload/Messenger.app
           mv Messenger Payload/Messenger.app/
           cat <<EOF > Payload/Messenger.app/Info.plist
           <?xml version="1.0" encoding="UTF-8"?>
-          <plist version="1.0"><dict>
-          <key>CFBundleExecutable</key><string>Messenger</string>
-          <key>CFBundleIdentifier</key><string>com.hq.globalmesh</string>
-          <key>CFBundleName</key><string>HQ Global</string>
-          <key>CFBundlePackageType</key><string>APPL</string>
-          <key>CFBundleShortVersionString</key><string>8.1</string>
-          <key>MinimumOSVersion</key><string>17.0</string>
-          <key>UILaunchScreen</key><dict/>
-          <key>NSCameraUsageDescription</key><string>Для видеозвонков и кружочков</string>
-          <key>NSMicrophoneUsageDescription</key><string>Для звонков и голосовых</string>
-          <key>NSPhotoLibraryUsageDescription</key><string>Для отправки медиа</string>
-          <key>NSLocalNetworkUsageDescription</key><string>Поиск узлов рядом</string>
-          <key>NSBonjourServices</key><array><string>_hq-mesh._tcp</string><string>_hq-mesh._udp</string></array>
-          </dict></plist>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key><string>Messenger</string>
+            <key>CFBundleIdentifier</key><string>com.hq.globalmesh</string>
+            <key>CFBundleName</key><string>HQ Global</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>8.1</string>
+            <key>MinimumOSVersion</key><string>17.0</string>
+            <key>UILaunchScreen</key><dict/>
+            <key>NSCameraUsageDescription</key><string>Для видеозвонков и кружочков</string>
+            <key>NSMicrophoneUsageDescription</key><string>Для звонков и голосовых</string>
+            <key>NSPhotoLibraryUsageDescription</key><string>Для отправки медиа</string>
+            <key>NSLocalNetworkUsageDescription</key><string>Поиск узлов рядом</string>
+            <key>NSBonjourServices</key><array><string>_hq-mesh._tcp</string><string>_hq-mesh._udp</string></array>
+          </dict>
+          </plist>
           EOF
           zip -r Messenger.ipa Payload
+
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
