@@ -1,62 +1,98 @@
 import SwiftUI
+import CoreImage.CIFilterBuiltins
 
 struct ContentView: View {
     @StateObject var meshManager = MeshNetworkManager()
     
     var body: some View {
-        NavigationView {
-            ZStack {
-                Color.black.edgesIgnoringSafeArea(.all)
-                
-                VStack(spacing: 25) {
-                    // Статус подключения
-                    HStack {
-                        Circle()
-                            .fill(meshManager.isConnected ? Color.green : Color.orange)
-                            .frame(width: 12, height: 12)
-                            .shadow(color: meshManager.isConnected ? .green : .orange, radius: 5)
-                        
-                        Text(meshManager.isConnected ? "HQ Node: Active (Global)" : "Поиск сигнала...")
-                            .foregroundColor(.white)
-                            .font(.system(size: 14, weight: .bold, design: .monospaced))
-                    }
-                    .padding()
-                    .background(Color.white.opacity(0.05))
-                    .cornerRadius(20)
-                    
-                    Text("HQ GLOBAL MESH")
-                        .font(.system(size: 32, weight: .black))
-                        .foregroundColor(.white)
-                        .tracking(5)
-                    
-                    // Список чатов (пока один тестовый)
-                    NavigationLink(destination: ChatView(contactName: "HQ Server Hub").environmentObject(meshManager)) {
-                        HStack {
-                            Image(systemName: "cpu.fill")
-                                .font(.title)
-                                .foregroundColor(.blue)
-                            VStack(alignment: .leading) {
-                                Text("Main Server Hub")
+        TabView {
+            // ВКЛАДКА 1: ЧАТЫ
+            NavigationView {
+                List {
+                    // Пока сделаем кнопку для начала чата по ID
+                    NavigationLink(destination: ChatView(contactID: "Введите ID контакта").environmentObject(meshManager)) {
+                        HStack(spacing: 15) {
+                            Circle()
+                                .fill(LinearGradient(gradient: Gradient(colors: [.blue, .purple]), startPoint: .topLeading, endPoint: .bottomTrailing))
+                                .frame(width: 50, height: 50)
+                                .overlay(Text("➕").foregroundColor(.white))
+                            
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Новый чат")
                                     .font(.headline)
-                                    .foregroundColor(.white)
-                                Text("Ryzen 7 9800X3D Online")
-                                    .font(.caption)
+                                Text("Начать общение по HQ ID")
+                                    .font(.subheadline)
                                     .foregroundColor(.gray)
                             }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .foregroundColor(.gray)
                         }
-                        .padding()
-                        .background(Color.white.opacity(0.1))
-                        .cornerRadius(25)
+                        .padding(.vertical, 4)
                     }
-                    .padding(.horizontal)
+                }
+                .navigationTitle("Чаты")
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Text(meshManager.isConnected ? "Подключено" : "Соединение...")
+                            .font(.caption)
+                            .foregroundColor(meshManager.isConnected ? .green : .red)
+                    }
+                }
+            }
+            .tabItem {
+                Label("Чаты", systemImage: "message.fill")
+            }
+            
+            // ВКЛАДКА 2: ПРОФИЛЬ И QR КОД
+            NavigationView {
+                VStack(spacing: 30) {
+                    Spacer()
+                    
+                    VStack(spacing: 10) {
+                        Text("Твой HQ ID")
+                            .font(.subheadline)
+                            .foregroundColor(.gray)
+                        Text(meshManager.myHQID)
+                            .font(.system(size: 34, weight: .bold, design: .monospaced))
+                    }
+                    
+                    // Генерация QR-кода
+                    Image(uiImage: generateQRCode(from: meshManager.myHQID))
+                        .interpolation(.none)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 200, height: 200)
+                        .padding(20)
+                        .background(Color.white)
+                        .cornerRadius(20)
+                        .shadow(radius: 10)
+                    
+                    Text("Дай отсканировать этот код или отправь свой ID другу, чтобы начать защищенный чат.")
+                        .multilineTextAlignment(.center)
+                        .font(.footnote)
+                        .foregroundColor(.gray)
+                        .padding(.horizontal, 40)
                     
                     Spacer()
                 }
-                .padding(.top, 40)
+                .navigationTitle("Профиль")
+            }
+            .tabItem {
+                Label("Профиль", systemImage: "person.crop.circle")
             }
         }
+    }
+    
+    // Функция создания QR-кода на лету
+    func generateQRCode(from string: String) -> UIImage {
+        let context = CIContext()
+        let filter = CIFilter.qrCodeGenerator()
+        let data = Data(string.utf8)
+        filter.setValue(data, forKey: "inputMessage")
+
+        if let outputImage = filter.outputImage {
+            if let cgImage = context.createCGImage(outputImage, from: outputImage.extent) {
+                return UIImage(cgImage: cgImage)
+            }
+        }
+        return UIImage(systemName: "xmark.circle") ?? UIImage()
     }
 }
