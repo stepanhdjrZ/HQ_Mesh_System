@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit // КРИТИЧНО ДЛЯ МЕНЮ ШЕРИНГА
 
 struct ContentView: View {
     @StateObject var meshManager = MeshNetworkManager()
