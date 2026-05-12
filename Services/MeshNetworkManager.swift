@@ -1,8 +1,9 @@
 import Foundation
 import MultipeerConnectivity
 import SwiftUI
+import UIKit // КРИТИЧНО ДЛЯ ВИБРАЦИИ И СИСТЕМНЫХ ФУНКЦИЙ
 
-// --- МОДЕЛИ ДАННЫХ (Теперь они здесь, чтобы ничего не терялось) ---
+// Модели данных
 struct ChatMessage: Identifiable, Codable {
     var id = UUID()
     let text: String
@@ -53,7 +54,6 @@ class MeshNetworkManager: NSObject, ObservableObject {
         if hasAccess { connectToHQ() }
     }
 
-    // --- АВТОРИЗАЦИЯ ---
     func requestEmailCode(email: String) {
         isWaitingForServer = true
         sendJSON(["type": "request_code", "email": email])
@@ -69,7 +69,6 @@ class MeshNetworkManager: NSObject, ObservableObject {
         ])
     }
 
-    // --- СЕТЬ ---
     func connectToHQ() {
         DispatchQueue.main.async { self.connectionState = .connecting }
         let url = URL(string: "wss://elevation-strength-authentic.ngrok-free.dev/ws")!
@@ -138,7 +137,6 @@ class MeshNetworkManager: NSObject, ObservableObject {
         }
     }
 
-    // --- MESH CORE ---
     private func setupMesh() {
         myPeerID = MCPeerID(displayName: myHQID)
         session = MCSession(peer: myPeerID, securityIdentity: nil, encryptionPreference: .required)
