@@ -11,22 +11,35 @@ struct ChatView: View {
                 VStack(spacing: 12) {
                     ForEach(meshManager.messages.filter { $0.partnerId == contactID }) { msg in
                         MessageBubble(msg: msg)
+                            .contextMenu {
+                                Button(role: .destructive) {
+                                    // Здесь будет логика локального игнора сообщений
+                                    print("Заблокирован пользователь \(contactID)")
+                                } label: {
+                                    Label("Заблокировать", systemImage: "hand.raised.fill")
+                                }
+                                Button {
+                                    // Отправка репорта на сервер
+                                    print("Жалоба на \(contactID) отправлена")
+                                } label: {
+                                    Label("Пожаловаться", systemImage: "exclamationmark.bubble.fill")
+                                }
+                            }
                     }
                 }
-                .padding(.top, 10)
+                .padding()
             }
             .background(Color(UIColor.secondarySystemBackground))
             
-            // Панель ввода в стиле ТГ
+            // Панель ввода
             HStack(spacing: 12) {
-                Button(action: {}) {
-                    Image(systemName: "paperclip").font(.title2).foregroundColor(.gray)
-                }
+                Image(systemName: "paperclip").font(.title2).foregroundColor(.gray)
                 
                 TextField("Сообщение", text: $text)
                     .padding(10)
                     .background(Color(UIColor.systemBackground))
                     .cornerRadius(20)
+                    .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.gray.opacity(0.2), lineWidth: 0.5))
                 
                 if text.isEmpty {
                     Image(systemName: "mic").font(.title2).foregroundColor(.gray)
@@ -36,9 +49,7 @@ struct ChatView: View {
                         text = ""
                         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                     }) {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.system(size: 32))
-                            .foregroundColor(.blue)
+                        Image(systemName: "arrow.up.circle.fill").font(.system(size: 32)).foregroundColor(.blue)
                     }
                 }
             }
@@ -51,12 +62,12 @@ struct ChatView: View {
     }
 }
 
-// Красивый пузырек с градиентом
 struct MessageBubble: View {
     let msg: ChatMessage
     var body: some View {
         HStack {
             if msg.isMe { Spacer(minLength: 60) }
+            
             VStack(alignment: .trailing, spacing: 4) {
                 Text(msg.text)
                     .font(.system(size: 16))
@@ -64,22 +75,12 @@ struct MessageBubble: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
-            .background(msg.isMe ? Color.blue : Color(UIColor.systemBackground))
+            .background(msg.isMe ? Color(red: 0.2, green: 0.5, blue: 1.0) : Color(UIColor.systemBackground))
             .foregroundColor(msg.isMe ? .white : .primary)
-            .clipShape(RoundedCorner(radius: 18, corners: msg.isMe ? [.topLeft, .bottomLeft, .topRight] : [.topRight, .bottomRight, .topLeft]))
+            .cornerRadius(18)
             .shadow(color: .black.opacity(0.05), radius: 1, y: 1)
+            
             if !msg.isMe { Spacer(minLength: 60) }
         }
-        .padding(.horizontal, 10)
-    }
-}
-
-// Вспомогательная форма для углов (обязательно вне других структур)
-struct RoundedCorner: Shape {
-    var radius: CGFloat = .infinity
-    var corners: UIRectCorner = .allCorners
-    func path(in rect: CGRect) -> Path {
-        let path = UIBezierPath(roundedRect: rect, byRoundingCorners: corners, cornerRadii: CGSize(width: radius, height: radius))
-        return Path(path.cgPath)
     }
 }
