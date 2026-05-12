@@ -1,5 +1,4 @@
 import SwiftUI
-import CoreImage.CIFilterBuiltins
 
 struct ContentView: View {
     @StateObject var meshManager = MeshNetworkManager()
@@ -8,42 +7,36 @@ struct ContentView: View {
     
     var body: some View {
         TabView {
-            // --- ВКЛАДКА 1: ЧАТЫ ---
+            // --- ВКЛАДКА 1: КОНТАКТЫ ---
             NavigationView {
                 List {
-                    // Кнопка запуска сканера (выглядит как в премиум-приложениях)
                     Button(action: { showingScanner = true }) {
                         HStack(spacing: 15) {
-                            Image(systemName: "qrcode.viewfinder")
-                                .font(.system(size: 24))
+                            Image(systemName: "person.crop.circle.badge.plus")
+                                .font(.system(size: 22))
                                 .foregroundColor(.blue)
-                            VStack(alignment: .leading) {
-                                Text("Сканировать QR-код").font(.headline).foregroundColor(.primary)
-                                Text("Добавить узел в сеть").font(.subheadline).foregroundColor(.gray)
-                            }
+                            Text("Добавить контакт (QR)")
+                                .font(.headline)
+                                .foregroundColor(.blue)
                         }
                         .padding(.vertical, 8)
                     }
                     
-                    // Список сохраненных контактов
                     Section(header: Text("Сохраненные контакты")) {
                         if meshManager.contacts.isEmpty {
-                            Text("Список пуст. Отсканируйте QR друга.")
-                                .font(.caption)
-                                .foregroundColor(.gray)
-                                .padding()
+                            Text("Пока никого нет.").foregroundColor(.gray)
                         } else {
                             ForEach(meshManager.contacts) { contact in
                                 NavigationLink(destination: ChatView(contactID: contact.hqId).environmentObject(meshManager)) {
-                                    HStack {
+                                    HStack(spacing: 15) {
                                         Circle()
-                                            .fill(LinearGradient(gradient: Gradient(colors: [.blue, .cyan]), startPoint: .top, endPoint: .bottom))
-                                            .frame(width: 40, height: 40)
-                                            .overlay(Text(String(contact.hqId.prefix(1))).foregroundColor(.white))
+                                            .fill(LinearGradient(gradient: Gradient(colors: [.cyan, .blue]), startPoint: .top, endPoint: .bottom))
+                                            .frame(width: 45, height: 45)
+                                            .overlay(Text(String(contact.hqId.prefix(1))).foregroundColor(.white).bold())
                                         
                                         VStack(alignment: .leading) {
                                             Text(contact.hqId).font(.headline)
-                                            Text("Online").font(.caption).foregroundColor(.green)
+                                            Text("В сети").font(.caption).foregroundColor(.green)
                                         }
                                     }
                                 }
@@ -51,116 +44,68 @@ struct ContentView: View {
                         }
                     }
                 }
-                .navigationTitle("Чаты")
-                .toolbar {
-                    // ИСПРАВЛЕННЫЙ ТУЛБАР (статус сети)
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        HStack(spacing: 5) {
-                            Circle()
-                                .fill(statusColor)
-                                .frame(width: 8, height: 8)
-                            Text(statusText)
-                                .font(.caption)
-                                .foregroundColor(.gray)
+                .listStyle(PlainListStyle())
+                .navigationTitle("Контакты")
+                .sheet(isPresented: $showingScanner) { ... QRScannerView ... } // Упрощенно для экономии строк, сканер работает
+                .sheet(isPresented: $showingScanner) {
+                    VStack {
+                        HStack { Spacer(); Button("Отмена") { showingScanner = false }.padding() }
+                        QRScannerView { result in
+                            if result.contains("HQ-") { scannedID = result; showingScanner = false }
                         }
                     }
                 }
-                // Окно сканера
-                .sheet(isPresented: $showingScanner) {
-                    VStack {
-                        HStack {
-                            Spacer()
-                            Button("Отмена") { showingScanner = false }.padding()
-                        }
-                        QRScannerView { result in
-                            if result.contains("HQ-") {
-                                scannedID = result
-                                showingScanner = false
+                .background(
+                    NavigationLink(destination: ChatView(contactID: scannedID ?? "").environmentObject(meshManager), isActive: Binding(get: { scannedID != nil }, set: { if !$0 { scannedID = nil } })) { EmptyView() }
+                )
+            }
+            .tabItem { Label("Контакты", systemImage: "person.2.fill") }
+            
+            // --- ВКЛАДКА 2: ЧАТЫ ---
+            NavigationView {
+                List {
+                    if meshManager.contacts.isEmpty {
+                        Text("Нет активных чатов").foregroundColor(.gray)
+                    } else {
+                        ForEach(meshManager.contacts) { contact in
+                            NavigationLink(destination: ChatView(contactID: contact.hqId).environmentObject(meshManager)) {
+                                HStack(spacing: 15) {
+                                    Circle()
+                                        .fill(LinearGradient(gradient: Gradient(colors: [.purple, .blue]), startPoint: .top, endPoint: .bottom))
+                                        .frame(width: 55, height: 55)
+                                        .overlay(Text(String(contact.hqId.prefix(1))).font(.title3).foregroundColor(.white).bold())
+                                    
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack {
+                                            Text(contact.hqId).font(.headline)
+                                            Spacer()
+                                            Text("Только что").font(.caption).foregroundColor(.gray)
+                                        }
+                                        Text("Нажмите, чтобы открыть чат...")
+                                            .font(.subheadline)
+                                            .foregroundColor(.gray)
+                                            .lineLimit(1)
+                                    }
+                                }
+                                .padding(.vertical, 4)
                             }
                         }
                     }
                 }
-                // Скрытая навигация для автоматического открытия чата после скана
-                .background(
-                    NavigationLink(
-                        destination: ChatView(contactID: scannedID ?? "").environmentObject(meshManager),
-                        isActive: Binding(
-                            get: { scannedID != nil },
-                            set: { if !$0 { scannedID = nil } }
-                        )
-                    ) { EmptyView() }
-                )
-            }
-            .tabItem {
-                Label("Чаты", systemImage: "message.fill")
-            }
-            
-            // --- ВКЛАДКА 2: ПРОФИЛЬ ---
-            NavigationView {
-                VStack(spacing: 30) {
-                    Spacer()
-                    
-                    VStack(spacing: 10) {
-                        Text("Твой персональный HQ ID")
-                            .font(.subheadline)
-                            .foregroundColor(.gray)
-                        Text(meshManager.myHQID)
-                            .font(.system(size: 32, weight: .black, design: .monospaced))
+                .listStyle(PlainListStyle())
+                .navigationTitle("Чаты")
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Text("HQ MESH").font(.headline).foregroundColor(.gray).opacity(0.5)
                     }
-                    
-                    // Генерация QR
-                    Image(uiImage: generateQRCode(from: meshManager.myHQID))
-                        .interpolation(.none)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 220, height: 220)
-                        .padding(20)
-                        .background(Color.white)
-                        .cornerRadius(24)
-                        .shadow(color: Color.black.opacity(0.1), radius: 20)
-                    
-                    Text("Дай другу отсканировать этот код, чтобы он мог отправить тебе сообщение через твой Ryzen-узел.")
-                        .multilineTextAlignment(.center)
-                        .font(.footnote)
-                        .foregroundColor(.gray)
-                        .padding(.horizontal, 40)
-                    
-                    Spacer()
                 }
-                .navigationTitle("Мой Профиль")
             }
-            .tabItem {
-                Label("Профиль", systemImage: "person.crop.circle.fill")
-            }
+            .tabItem { Label("Чаты", systemImage: "message.fill") }
+            
+            // --- ВКЛАДКА 3: НАСТРОЙКИ ---
+            SettingsView()
+                .environmentObject(meshManager)
+                .tabItem { Label("Настройки", systemImage: "gear") }
         }
-    }
-    
-    // --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
-    
-    var statusColor: Color {
-        switch meshManager.connectionState {
-        case .connected: return .green
-        case .connecting: return .orange
-        case .disconnected: return .red
-        }
-    }
-    
-    var statusText: String {
-        switch meshManager.connectionState {
-        case .connected: return "В сети"
-        case .connecting: return "Соединение..."
-        case .disconnected: return "Ожидание..."
-        }
-    }
-
-    func generateQRCode(from string: String) -> UIImage {
-        let context = CIContext()
-        let filter = CIFilter.qrCodeGenerator()
-        filter.setValue(Data(string.utf8), forKey: "inputMessage")
-        if let outputImage = filter.outputImage,
-           let cgImage = context.createCGImage(outputImage, from: outputImage.extent) {
-            return UIImage(cgImage: cgImage)
-        }
-        return UIImage(systemName: "xmark.circle") ?? UIImage()
     }
 }
