@@ -2,174 +2,162 @@ import Foundation
 import MultipeerConnectivity
 import SwiftUI
 
-// Константы для СМС-заглушки
-struct MockSMS {
-    static let code = "1234" // Любой номер, код 1234
-    static let delay: Double = 1.2
-}
-
 class MeshNetworkManager: NSObject, ObservableObject {
     @Published var connectionState: ConnectionState = .disconnected
     @Published var messages: [ChatMessage] = []
     @Published var contacts: [Contact] = []
-    @Published var nearbyNodes: [String] = [] // Реальные узлы вокруг
+    @Published var nearbyNodes: [String] = []
     @Published var myHQID: String = ""
+    @Published var myUsername: String = ""
+    @Published var myNickname: String = ""
     @Published var hasAccess = false
+    
+    // Состояния для процесса регистрации
+    @Published var authStep: AuthStep = .enterEmail
+    @Published var isWaitingForServer = false
+    @Published var authError = ""
 
     enum ConnectionState { case disconnected, connecting, connected, meshOnly }
+    enum AuthStep { case enterEmail, enterCode, setupProfile }
     
     private var webSocket: URLSessionWebSocketTask?
-    private var pingTimer: Timer?
-    
-    // MESH CORE (Apple Multipeer Connectivity)
     private let serviceType = "hq-global-mesh"
     private var myPeerID: MCPeerID!
-    private var serviceAdvertiser: MCNearbyServiceAdvertiser!
-    private var serviceBrowser: MCNearbyServiceBrowser!
     private var session: MCSession!
+    private var advertiser: MCNearbyServiceAdvertiser!
+    private var browser: MCNearbyServiceBrowser!
 
     override init() {
         super.init()
         loadData()
-        setupMesh() // Запускаем Bluetooth-движок
-        if hasAccess { connectToHQ() }
+        setupMesh()
+        connectToHQ()
+    }
+
+    // --- АВТОРИЗАЦИЯ ЧЕРЕЗ РЕАЛЬНЫЙ СЕРВЕР ---
+    
+    func requestEmailCode(email: String) {
+        isWaitingForServer = true
+        sendJSON(["type": "request_code", "email": email])
     }
     
-    // 1. НАСТРОЙКА РЕАЛЬНОГО MESH (P2P)
+    func registerUser(email: String, code: String, username: String, nickname: String) {
+        isWaitingForServer = true
+        sendJSON([
+            "type": "verify_and_register",
+            "email": email,
+            "code": code,
+            "username": username,
+            "nickname": nickname,
+            "hq_id": myHQID
+        ])
+    }
+
+    // --- СЕТЕВАЯ ЛОГИКА ---
+
+    func connectToHQ() {
+        let url = URL(string: "wss://elevation-strength-authentic.ngrok-free.dev/ws")!
+        webSocket = URLSession.shared.webSocketTask(with: url)
+        webSocket?.resume()
+        listenWS()
+        
+        if hasAccess {
+            sendJSON(["type": "register", "my_id": myHQID])
+        }
+    }
+
+    private func listenWS() {
+        webSocket?.receive { [weak self] result in
+            switch result {
+            case .success(let msg):
+                if case .string(let text) = msg { self?.handleServerResponse(text) }
+                self?.listenWS()
+                DispatchQueue.main.async { self?.connectionState = .connected }
+            case .failure:
+                DispatchQueue.main.async { self?.connectionState = .meshOnly }
+                self.reconnect()
+            }
+        }
+    }
+
+    private func handleServerResponse(_ text: String) {
+        guard let data = text.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        
+        DispatchQueue.main.async {
+            self.isWaitingForServer = false
+            let type = json["type"] as? String
+            
+            if type == "code_response" {
+                if json["success"] as? Bool == true { self.authStep = .enterCode }
+                else { self.authError = "Ошибка отправки письма." }
+            } 
+            else if type == "auth_success" {
+                self.hasAccess = true
+                UserDefaults.standard.set(true, forKey: "isRegistered")
+                // Сохраняем профиль локально
+                UserDefaults.standard.set(self.myUsername, forKey: "myUsername")
+                UserDefaults.standard.set(self.myNickname, forKey: "myNickname")
+            }
+            else if type == "auth_error" {
+                self.authError = json["text"] as? String ?? "Ошибка"
+            }
+            else if type == "msg" {
+                self.parseMessage(json)
+            }
+        }
+    }
+
+    // --- MESH & MESSAGING ---
+
+    func sendMessage(to targetID: String, text: String) {
+        let payload: [String: Any] = ["type": "private_msg", "to_id": targetID, "text": text]
+        sendJSON(payload)
+        
+        if let data = try? JSONSerialization.data(withJSONObject: payload) {
+            try? session.send(data, toPeers: session.connectedPeers, with: .reliable)
+        }
+        
+        messages.append(ChatMessage(text: text, isMe: true, partnerId: targetID, timestamp: Date()))
+    }
+
+    private func sendJSON(_ dict: [String: Any]) {
+        if let data = try? JSONSerialization.data(withJSONObject: dict),
+           let string = String(data: data, encoding: .utf8) {
+            webSocket?.send(.string(string)) { _ in }
+        }
+    }
+
     private func setupMesh() {
         myPeerID = MCPeerID(displayName: myHQID)
         session = MCSession(peer: myPeerID, securityIdentity: nil, encryptionPreference: .required)
         session.delegate = self
-        
-        serviceAdvertiser = MCNearbyServiceAdvertiser(peer: myPeerID, discoveryInfo: nil, serviceType: serviceType)
-        serviceAdvertiser.delegate = self
-        serviceAdvertiser.startAdvertisingPeer()
-        
-        serviceBrowser = MCNearbyServiceBrowser(peer: myPeerID, serviceType: serviceType)
-        serviceBrowser.delegate = self
-        serviceBrowser.startBrowsingForPeers()
+        advertiser = MCNearbyServiceAdvertiser(peer: myPeerID, discoveryInfo: nil, serviceType: serviceType)
+        advertiser.delegate = self
+        advertiser.startAdvertisingPeer()
+        browser = MCNearbyServiceBrowser(peer: myPeerID, serviceType: serviceType)
+        browser.delegate = self
+        browser.startBrowsingForPeers()
     }
 
-    // 2. ВХОД И ИМИТАЦИЯ СМС
-    func requestSMSCode(for phone: String, completion: @escaping (Bool) -> Void) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + MockSMS.delay) { completion(true) }
-    }
-    
-    func verifyCode(_ code: String, completion: @escaping (Bool) -> Void) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + MockSMS.delay) {
-            let success = code == MockSMS.code
-            if success {
-                self.hasAccess = true
-                UserDefaults.standard.set(true, forKey: "isRegistered")
-                self.connectToHQ()
+    private func parseMessage(_ json: [String: Any]) {
+        if let senderId = json["from_id"] as? String, let msgText = json["text"] as? String {
+            self.messages.append(ChatMessage(text: msgText, isMe: false, partnerId: senderId, timestamp: Date()))
+            if !contacts.contains(where: { $0.hqId == senderId }) {
+                contacts.append(Contact(hqId: senderId, name: "Node \(senderId.prefix(4))", lastMessageDate: Date()))
             }
-            completion(success)
         }
     }
 
-    // 3. РЕАЛЬНЫЙ WEBSOCKET
-    func connectToHQ() {
-        DispatchQueue.main.async { self.connectionState = .connecting }
-        let url = URL(string: "wss://hq-mesh.site/ws")!
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 10
-        
-        webSocket = URLSession.shared.webSocketTask(with: request)
-        webSocket?.resume()
-        
-        let registerMsg = "{\"type\": \"register\", \"my_id\": \"\(myHQID)\"}"
-        webSocket?.send(.string(registerMsg)) { error in
-            if error == nil {
-                DispatchQueue.main.async { self.connectionState = .connected }
-                self.listen()
-                self.startHeartbeat()
-            } else { self.handleDisconnect() }
-        }
+    private func reconnect() {
+        DispatchQueue.global().asyncAfter(deadline: .now() + 5) { self.connectToHQ() }
     }
     
-    // 4. УПРАВЛЕНИЕ ДАННЫМИ И УДАЛЕНИЕ (Для Apple)
-    func sendMessage(to targetID: String, text: String) {
-        let msgPayload: [String: Any] = ["type": "private_msg", "to_id": targetID, "text": text]
-        
-        // Попытка отправить через сервер
-        if connectionState == .connected {
-            if let data = try? JSONSerialization.data(withJSONObject: msgPayload),
-               let string = String(data: data, encoding: .utf8) {
-                webSocket?.send(.string(string)) { _ in }
-            }
-        }
-        
-        // Попытка отправить через Mesh (Bluetooth)
-        if let data = try? JSONSerialization.data(withJSONObject: msgPayload) {
-            try? session.send(data, toPeers: session.connectedPeers, with: .reliable)
-        }
-        
-        // Локальное сохранение
-        DispatchQueue.main.async {
-            let newMsg = ChatMessage(text: text, isMe: true, partnerId: targetID, timestamp: Date())
-            self.messages.append(newMsg)
-            self.saveContact(id: targetID)
-        }
-    }
-    
-    func deleteAccountRequest() {
-        let deleteMsg = "{\"type\": \"delete_account\", \"my_id\": \"\(myHQID)\"}"
-        webSocket?.send(.string(deleteMsg)) { _ in
-            self.webSocket?.cancel(with: .goingAway, reason: nil)
-            DispatchQueue.main.async {
-                self.connectionState = .disconnected
-                self.messages.removeAll()
-                self.contacts.removeAll()
-                UserDefaults.standard.removeObject(forKey: "myHQID")
-                UserDefaults.standard.set(false, forKey: "isRegistered")
-                self.loadData() // Генерируем новый ID
-            }
-        }
-    }
-    
-    // Внутренняя логика (WebSocket parse, loadData, и т.д.)
-    private func listen() {
-        webSocket?.receive { [weak self] result in
-            switch result {
-            case .success(let msg):
-                if case .string(let text) = msg { self?.parse(text) }
-                self?.listen()
-            case .failure: self?.handleDisconnect()
-            }
-        }
-    }
-    private func startHeartbeat() {
-        pingTimer?.invalidate()
-        pingTimer = Timer.scheduledTimer(withTimeInterval: 15.0, repeats: true) { [weak self] _ in
-            self?.webSocket?.sendPing { error in
-                if error != nil { self?.handleDisconnect() }
-            }
-        }
-    }
-    private func parse(_ text: String) {
-        guard let data = text.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let type = json["type"] as? String, type == "msg",
-              let senderId = json["from_id"] as? String,
-              let msgText = json["text"] as? String else { return }
-        
-        DispatchQueue.main.async {
-            let newMsg = ChatMessage(text: msgText, isMe: false, partnerId: senderId, timestamp: Date())
-            self.messages.append(newMsg)
-            self.saveContact(id: senderId)
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
-        }
-    }
-    private func handleDisconnect() {
-        DispatchQueue.main.async { self.connectionState = .disconnected }
-        pingTimer?.invalidate()
-        DispatchQueue.global().asyncAfter(deadline: .now() + 5.0) { [weak self] in self?.connectToHQ() }
-    }
-    private func saveContact(id: String) {
-        if !contacts.contains(where: { $0.hqId == id }) { contacts.append(Contact(hqId: id, name: "Node \(id.prefix(4))", lastMessageDate: Date())) }
-    }
     private func loadData() {
-        hasAccess = UserDefaults.standard.bool(forKey: "isRegistered")
+        self.hasAccess = UserDefaults.standard.bool(forKey: "isRegistered")
+        self.myUsername = UserDefaults.standard.string(forKey: "myUsername") ?? ""
+        self.myNickname = UserDefaults.standard.string(forKey: "myNickname") ?? ""
+        
         if let savedID = UserDefaults.standard.string(forKey: "myHQID") { self.myHQID = savedID }
         else {
             let newID = "HQ-\(UUID().uuidString.prefix(5))"
@@ -179,7 +167,6 @@ class MeshNetworkManager: NSObject, ObservableObject {
     }
 }
 
-// ДЕЛЕГАТЫ MESH-СЕТИ (Bluetooth)
 extension MeshNetworkManager: MCSessionDelegate, MCNearbyServiceAdvertiserDelegate, MCNearbyServiceBrowserDelegate {
     func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didReceiveInvitationFromPeer peerID: MCPeerID, withContext context: Data?, invitationHandler: @escaping (Bool, MCSession?) -> Void) { invitationHandler(true, session) }
     func browser(_ browser: MCNearbyServiceBrowser, foundPeer peerID: MCPeerID, withDiscoveryInfo info: [String : String]?) { browser.invitePeer(peerID, to: session, withContext: nil, timeout: 10) }
