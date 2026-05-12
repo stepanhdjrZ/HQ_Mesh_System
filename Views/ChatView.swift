@@ -13,14 +13,12 @@ struct ChatView: View {
                         MessageBubble(msg: msg)
                             .contextMenu {
                                 Button(role: .destructive) {
-                                    // Здесь будет логика локального игнора сообщений
-                                    print("Заблокирован пользователь \(contactID)")
+                                    print("Блок: \(contactID)")
                                 } label: {
                                     Label("Заблокировать", systemImage: "hand.raised.fill")
                                 }
                                 Button {
-                                    // Отправка репорта на сервер
-                                    print("Жалоба на \(contactID) отправлена")
+                                    print("Репорт: \(contactID)")
                                 } label: {
                                     Label("Пожаловаться", systemImage: "exclamationmark.bubble.fill")
                                 }
@@ -31,7 +29,6 @@ struct ChatView: View {
             }
             .background(Color(UIColor.secondarySystemBackground))
             
-            // Панель ввода
             HStack(spacing: 12) {
                 Image(systemName: "paperclip").font(.title2).foregroundColor(.gray)
                 
@@ -69,8 +66,7 @@ struct MessageBubble: View {
             if msg.isMe { Spacer(minLength: 60) }
             
             VStack(alignment: .trailing, spacing: 4) {
-                Text(msg.text)
-                    .font(.system(size: 16))
+                Text(msg.text).font(.system(size: 16))
                 Text(msg.timeString).font(.system(size: 10)).opacity(0.5)
             }
             .padding(.horizontal, 14)
