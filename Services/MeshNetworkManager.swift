@@ -6,13 +6,12 @@ class MeshNetworkManager: NSObject, ObservableObject {
     @Published var connectionState: ConnectionState = .disconnected
     @Published var messages: [ChatMessage] = []
     @Published var myHQID: String = ""
-    @Published var nearbyNodes: Int = 0 
+    @Published var nearbyNodes: Int = 0
+    @Published var contacts: [Contact] = []
     
     enum ConnectionState { case disconnected, connecting, connected, meshOnly }
     
     private var webSocket: URLSessionWebSocketTask?
-    
-    // MESH CORE (Apple Multipeer Connectivity)
     private let serviceType = "hq-mesh-p2p"
     private var myPeerID: MCPeerID!
     private var advertiser: MCNearbyServiceAdvertiser!
@@ -22,19 +21,17 @@ class MeshNetworkManager: NSObject, ObservableObject {
     override init() {
         super.init()
         loadData()
-        setupMesh() 
-        connectToHQ() 
+        setupMesh()
+        connectToHQ()
     }
     
     private func setupMesh() {
         myPeerID = MCPeerID(displayName: myHQID)
         session = MCSession(peer: myPeerID, securityIdentity: nil, encryptionPreference: .required)
         session.delegate = self
-        
         advertiser = MCNearbyServiceAdvertiser(peer: myPeerID, discoveryInfo: nil, serviceType: serviceType)
         advertiser.delegate = self
         advertiser.startAdvertisingPeer()
-        
         browser = MCNearbyServiceBrowser(peer: myPeerID, serviceType: serviceType)
         browser.delegate = self
         browser.startBrowsingForPeers()
@@ -42,10 +39,11 @@ class MeshNetworkManager: NSObject, ObservableObject {
 
     func connectToHQ() {
         DispatchQueue.main.async { self.connectionState = .connecting }
-        // ВАЖНО: Вставь сюда ссылку из туннеля (ngrok или hq-mesh.site)
-        let url = URL(string: "wss://hq-mesh.site/ws")!
+        
+        // ТВОЯ ССЫЛКА ИЗ NGROK
+        let url = URL(string: "wss://elevation-strength-authentic.ngrok-free.dev/ws")!
         var request = URLRequest(url: url)
-        request.timeoutInterval = 10
+        request.timeoutInterval = 15
         
         webSocket = URLSession.shared.webSocketTask(with: request)
         webSocket?.resume()
@@ -56,17 +54,15 @@ class MeshNetworkManager: NSObject, ObservableObject {
 
     func sendMessage(to targetID: String, text: String) {
         let payload: [String: Any] = ["type": "private_msg", "to_id": targetID, "text": text]
-        
-        // 1. Через сервер
         sendJSON(payload)
         
-        // 2. Через Bluetooth Mesh (для всех кто рядом)
         if let data = try? JSONSerialization.data(withJSONObject: payload) {
             try? session.send(data, toPeers: session.connectedPeers, with: .reliable)
         }
         
         DispatchQueue.main.async {
-            self.messages.append(ChatMessage(text: text, isMe: true, partnerId: targetID, timestamp: Date()))
+            let newMsg = ChatMessage(text: text, isMe: true, partnerId: targetID, timestamp: Date())
+            self.messages.append(newMsg)
         }
     }
     
@@ -99,9 +95,18 @@ class MeshNetworkManager: NSObject, ObservableObject {
               let msgText = json["text"] as? String else { return }
         
         DispatchQueue.main.async {
-            self.messages.append(ChatMessage(text: msgText, isMe: false, partnerId: senderId, timestamp: Date()))
+            let newMsg = ChatMessage(text: msgText, isMe: false, partnerId: senderId, timestamp: Date())
+            self.messages.append(newMsg)
+            if !self.contacts.contains(where: { $0.hqId == senderId }) {
+                self.contacts.append(Contact(hqId: senderId, name: "Node \(senderId.prefix(4))", lastMessageDate: Date()))
+            }
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         }
+    }
+
+    func deleteAccountRequest() {
+        UserDefaults.standard.removeObject(forKey: "myHQID")
+        self.loadData()
     }
 
     private func reconnect() {
@@ -118,22 +123,15 @@ class MeshNetworkManager: NSObject, ObservableObject {
     }
 }
 
-// MESH LOGIC
 extension MeshNetworkManager: MCSessionDelegate, MCNearbyServiceAdvertiserDelegate, MCNearbyServiceBrowserDelegate {
-    func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didReceiveInvitationFromPeer peerID: MCPeerID, withContext context: Data?, invitationHandler: @escaping (Bool, MCSession?) -> Void) {
-        invitationHandler(true, session)
-    }
-    func browser(_ browser: MCNearbyServiceBrowser, foundPeer peerID: MCPeerID, withDiscoveryInfo info: [String : String]?) {
-        browser.invitePeer(peerID, to: session, withContext: nil, timeout: 10)
-    }
-    func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) {
-        DispatchQueue.main.async { self.nearbyNodes = session.connectedPeers.count }
-    }
+    func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didReceiveInvitationFromPeer peerID: MCPeerID, withContext context: Data?, invitationHandler: @escaping (Bool, MCSession?) -> Void) { invitationHandler(true, session) }
+    func browser(_ browser: MCNearbyServiceBrowser, foundPeer peerID: MCPeerID, withDiscoveryInfo info: [String : String]?) { browser.invitePeer(peerID, to: session, withContext: nil, timeout: 10) }
+    func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) { DispatchQueue.main.async { self.nearbyNodes = session.connectedPeers.count } }
     func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
-        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let text = json["text"] as? String {
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let text = json["text"] as? String {
             DispatchQueue.main.async {
-                self.messages.append(ChatMessage(text: text, isMe: false, partnerId: peerID.displayName, timestamp: Date()))
+                let newMsg = ChatMessage(text: text, isMe: false, partnerId: peerID.displayName, timestamp: Date())
+                self.messages.append(newMsg)
             }
         }
     }
