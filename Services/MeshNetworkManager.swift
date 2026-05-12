@@ -20,6 +20,8 @@ class MeshNetworkManager: NSObject, ObservableObject {
     
     func connectToHQ() {
         DispatchQueue.main.async { self.connectionState = .connecting }
+        
+        // Твой домен, который мы пустим через туннель
         let url = URL(string: "wss://hq-mesh.site/ws")!
         var request = URLRequest(url: url)
         request.timeoutInterval = 10
