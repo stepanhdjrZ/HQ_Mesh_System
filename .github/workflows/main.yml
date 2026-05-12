@@ -18,6 +18,7 @@ jobs:
           Views/ContentView.swift \
           Views/ChatView.swift \
           Views/QRScannerView.swift \
+          Views/SettingsView.swift \
           -target arm64-apple-ios17.0 \
           -sdk $(xcrun --show-sdk-path --sdk iphoneos) \
           -swift-version 5 \
@@ -25,8 +26,6 @@ jobs:
           -framework SwiftUI \
           -framework UIKit \
           -framework AVFoundation \
-          -framework PhotosUI \
-          -framework MultipeerConnectivity \
           -framework CoreImage \
           -emit-executable -o Messenger
 
@@ -43,14 +42,10 @@ jobs:
             <key>CFBundleIdentifier</key><string>com.hq.globalmesh</string>
             <key>CFBundleName</key><string>HQ Global</string>
             <key>CFBundlePackageType</key><string>APPL</string>
-            <key>CFBundleShortVersionString</key><string>8.2</string>
+            <key>CFBundleShortVersionString</key><string>9.0 PRO</string>
             <key>MinimumOSVersion</key><string>17.0</string>
             <key>UILaunchScreen</key><dict/>
             <key>NSCameraUsageDescription</key><string>Для сканирования QR-кодов и звонков</string>
-            <key>NSMicrophoneUsageDescription</key><string>Для звонков и голосовых</string>
-            <key>NSPhotoLibraryUsageDescription</key><string>Для отправки медиа</string>
-            <key>NSLocalNetworkUsageDescription</key><string>Поиск узлов рядом</string>
-            <key>NSBonjourServices</key><array><string>_hq-mesh._tcp</string><string>_hq-mesh._udp</string></array>
           </dict>
           </plist>
           EOF
@@ -59,5 +54,5 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: HQ-GodMode-v8-2
+          name: HQ-PRO-v9
           path: Messenger.ipa
