@@ -21,10 +21,8 @@ struct SettingsView: View {
                             )
                         
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Основатель HQ")
-                                .font(.title2).bold()
-                            Text("ID: \(meshManager.myHQID)")
-                                .font(.subheadline).foregroundColor(.gray)
+                            Text("Основатель HQ").font(.title2).bold()
+                            Text("ID: \(meshManager.myHQID)").font(.subheadline).foregroundColor(.gray)
                         }
                     }
                     .padding(.vertical, 8)
@@ -32,22 +30,21 @@ struct SettingsView: View {
                 
                 Section(header: Text("Сеть")) {
                     HStack {
-                        Label("Статус Ryzen", systemImage: "cpu")
+                        Label("Статус Штаба", systemImage: "cpu")
                         Spacer()
                         Circle()
                             .fill(meshManager.connectionState == .connected ? Color.green : .orange)
                             .frame(width: 8, height: 8)
-                        Text(meshManager.connectionState == .connected ? "В сети" : "Подключение")
-                            .foregroundColor(.gray)
+                        Text(meshManager.connectionState == .connected ? "В сети" : "Поиск...").foregroundColor(.gray)
                     }
                     Button(action: { showQR = true }) {
-                        Label("Мой QR-код", systemImage: "qrcode")
+                        Label("Мой QR-код узла", systemImage: "qrcode")
                     }
                 }
                 
-                Section(header: Text("Управление данными")) {
+                Section(header: Text("Управление аккаунтом")) {
                     Button(role: .destructive, action: { showDeleteAlert = true }) {
-                        Label("Удалить аккаунт", systemImage: "trash.fill")
+                        Label("Удалить аккаунт и данные", systemImage: "trash.fill")
                     }
                     .alert("Удаление Империи", isPresented: $showDeleteAlert) {
                         Button("Отмена", role: .cancel) { }
@@ -55,22 +52,27 @@ struct SettingsView: View {
                             meshManager.deleteAccountRequest()
                         }
                     } message: {
-                        Text("Это действие безвозвратно удалит ваш HQ ID и все данные. Подписка будет аннулирована.")
+                        Text("Это безвозвратно удалит ваш HQ ID из базы. Подписка (50 руб/мес) будет остановлена.")
                     }
                 }
                 
                 Section(header: Text("Приложение")) {
                     Label("Уведомления", systemImage: "bell.fill").foregroundColor(.red)
-                    Label("Оформление", systemImage: "paintbrush.fill").foregroundColor(.blue)
+                    Label("Тема оформления", systemImage: "paintbrush.fill").foregroundColor(.blue)
                 }
             }
             .navigationTitle("Настройки")
             .sheet(isPresented: $showQR) {
                 VStack(spacing: 30) {
-                    Text("Твой код").font(.title2).bold().padding(.top, 40)
+                    Text("Твой Mesh-код").font(.title2).bold().padding(.top, 40)
                     Image(uiImage: generateQRCode(from: meshManager.myHQID))
-                        .interpolation(.none).resizable().scaledToFit().frame(width: 250, height: 250)
-                        .background(Color.white).cornerRadius(15).shadow(radius: 10)
+                        .interpolation(.none)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 250, height: 250)
+                        .background(Color.white)
+                        .cornerRadius(15)
+                        .shadow(radius: 10)
                     Text(meshManager.myHQID).font(.system(.title3, design: .monospaced)).bold()
                     Spacer()
                     Button("Закрыть") { showQR = false }.buttonStyle(.borderedProminent).padding(.bottom, 40)
