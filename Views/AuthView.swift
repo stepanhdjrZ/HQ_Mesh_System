@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit // КРИТИЧНО ДЛЯ КЛАВИАТУРЫ И ВИБРАЦИИ
 
 struct AuthView: View {
     @EnvironmentObject var meshManager: MeshNetworkManager
@@ -23,13 +24,18 @@ struct AuthView: View {
                     if meshManager.authStep == .enterEmail {
                         HStack {
                             Image(systemName: "envelope.fill").foregroundColor(.blue).frame(width: 30)
-                            TextField("Ваш Email", text: $email).foregroundColor(.white).keyboardType(.emailAddress).autocapitalization(.none)
+                            TextField("Ваш Email", text: $email)
+                                .foregroundColor(.white)
+                                .keyboardType(.emailAddress)
+                                .autocapitalization(.none)
                         }.padding().background(Color.white.opacity(0.05)).cornerRadius(12).overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.1), lineWidth: 1))
                     } 
                     else if meshManager.authStep == .enterCode {
                         HStack {
                             Image(systemName: "key.fill").foregroundColor(.blue).frame(width: 30)
-                            TextField("Код из письма", text: $code).foregroundColor(.white).keyboardType(.numberPad)
+                            TextField("Код из письма", text: $code)
+                                .foregroundColor(.white)
+                                .keyboardType(.numberPad)
                         }.padding().background(Color.white.opacity(0.05)).cornerRadius(12).overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.1), lineWidth: 1))
                     } 
                     else if meshManager.authStep == .setupProfile {
@@ -52,8 +58,11 @@ struct AuthView: View {
                 
                 Button(action: handleAction) {
                     ZStack {
-                        if meshManager.isWaitingForServer { ProgressView().progressViewStyle(CircularProgressViewStyle(tint: .white)) }
-                        else { Text(buttonTitle).bold().foregroundColor(.white) }
+                        if meshManager.isWaitingForServer { 
+                            ProgressView().tint(.white) 
+                        } else { 
+                            Text(buttonTitle).bold().foregroundColor(.white) 
+                        }
                     }
                     .frame(maxWidth: .infinity).padding().background(Color.blue).cornerRadius(15).shadow(color: .blue.opacity(0.3), radius: 10)
                 }
