@@ -1,93 +1,59 @@
 import SwiftUI
-import CoreImage.CIFilterBuiltins
 
 struct SettingsView: View {
     @EnvironmentObject var meshManager: MeshNetworkManager
-    @State private var showQR = false
-    @State private var showDeleteAlert = false
-
+    
     var body: some View {
-        NavigationView {
-            List {
-                Section {
-                    HStack(spacing: 16) {
-                        Circle()
-                            .fill(LinearGradient(gradient: Gradient(colors: [.blue, .purple]), startPoint: .topLeading, endPoint: .bottomTrailing))
-                            .frame(width: 80, height: 80)
-                            .overlay(
-                                Text(String(meshManager.myHQID.prefix(1)))
-                                    .font(.system(size: 36, weight: .bold))
-                                    .foregroundColor(.white)
-                            )
-                        
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Основатель HQ").font(.title2).bold()
-                            Text("ID: \(meshManager.myHQID)").font(.subheadline).foregroundColor(.gray)
-                        }
-                    }
-                    .padding(.vertical, 8)
-                }
-                
-                Section(header: Text("Сеть")) {
-                    HStack {
-                        Label("Статус Штаба", systemImage: "cpu")
-                        Spacer()
-                        Circle()
-                            .fill(meshManager.connectionState == .connected ? Color.green : .orange)
-                            .frame(width: 8, height: 8)
-                        Text(meshManager.connectionState == .connected ? "В сети" : "Поиск...").foregroundColor(.gray)
-                    }
-                    Button(action: { showQR = true }) {
-                        Label("Мой QR-код узла", systemImage: "qrcode")
-                    }
-                }
-                
-                Section(header: Text("Управление аккаунтом")) {
-                    Button(role: .destructive, action: { showDeleteAlert = true }) {
-                        Label("Удалить аккаунт и данные", systemImage: "trash.fill")
-                    }
-                    .alert("Удаление Империи", isPresented: $showDeleteAlert) {
-                        Button("Отмена", role: .cancel) { }
-                        Button("Удалить всё", role: .destructive) {
-                            meshManager.deleteAccountRequest()
-                        }
-                    } message: {
-                        Text("Это безвозвратно удалит ваш HQ ID из базы. Подписка (50 руб/мес) будет остановлена.")
-                    }
-                }
-                
-                Section(header: Text("Приложение")) {
-                    Label("Уведомления", systemImage: "bell.fill").foregroundColor(.red)
-                    Label("Тема оформления", systemImage: "paintbrush.fill").foregroundColor(.blue)
-                }
-            }
-            .navigationTitle("Настройки")
-            .sheet(isPresented: $showQR) {
-                VStack(spacing: 30) {
-                    Text("Твой Mesh-код").font(.title2).bold().padding(.top, 40)
-                    Image(uiImage: generateQRCode(from: meshManager.myHQID))
-                        .interpolation(.none)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 250, height: 250)
-                        .background(Color.white)
-                        .cornerRadius(15)
+        ZStack {
+            Color(UIColor.systemGroupedBackground).ignoresSafeArea()
+            
+            VStack(spacing: 20) {
+                // Header
+                VStack {
+                    Circle()
+                        .fill(LinearGradient(colors: [.blue, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 100, height: 100)
+                        .overlay(Text(String(meshManager.myHQID.prefix(1))).font(.system(size: 40, weight: .bold)).foregroundColor(.white))
                         .shadow(radius: 10)
-                    Text(meshManager.myHQID).font(.system(.title3, design: .monospaced)).bold()
-                    Spacer()
-                    Button("Закрыть") { showQR = false }.buttonStyle(.borderedProminent).padding(.bottom, 40)
+                    
+                    Text("Основатель HQ").font(.title2).bold()
+                    Text("ID: \(meshManager.myHQID)").foregroundColor(.gray)
                 }
+                .padding(.top, 40)
+
+                // Status Card
+                VStack(spacing: 0) {
+                    StatusRow(title: "Штаб (Ryzen)", status: meshManager.connectionState == .connected ? "В сети" : "Поиск...", color: meshManager.connectionState == .connected ? .green : .orange)
+                    Divider().padding(.leading, 50)
+                    StatusRow(title: "Mesh (P2P)", status: "\(meshManager.nearbyDevices.count) узлов рядом", color: .blue)
+                }
+                .background(Color(UIColor.secondarySystemGroupedBackground))
+                .cornerRadius(15)
+                .padding(.horizontal)
+
+                Spacer()
             }
         }
     }
+}
+
+struct StatusRow: View {
+    let title: String
+    let status: String
+    let color: Color
     
-    func generateQRCode(from string: String) -> UIImage {
-        let context = CIContext()
-        let filter = CIFilter.qrCodeGenerator()
-        filter.setValue(Data(string.utf8), forKey: "inputMessage")
-        if let outputImage = filter.outputImage, let cgImage = context.createCGImage(outputImage, from: outputImage.extent) {
-            return UIImage(cgImage: cgImage)
+    var body: some View {
+        HStack {
+            Image(systemName: "antenna.radiowaves.left.and.right")
+                .foregroundColor(.white)
+                .padding(8)
+                .background(color)
+                .cornerRadius(8)
+            
+            Text(title)
+            Spacer()
+            Text(status).foregroundColor(.gray)
         }
-        return UIImage()
+        .padding()
     }
 }
