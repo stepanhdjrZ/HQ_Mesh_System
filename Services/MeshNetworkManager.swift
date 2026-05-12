@@ -20,6 +20,7 @@ class MeshNetworkManager: NSObject, ObservableObject {
     
     func connectToHQ() {
         DispatchQueue.main.async { self.connectionState = .connecting }
+        // Твой домен HQ Global
         let url = URL(string: "wss://hq-mesh.site/ws")!
         var request = URLRequest(url: url)
         request.timeoutInterval = 10
@@ -39,15 +40,6 @@ class MeshNetworkManager: NSObject, ObservableObject {
         }
     }
     
-    private func startHeartbeat() {
-        pingTimer?.invalidate()
-        pingTimer = Timer.scheduledTimer(withTimeInterval: 15.0, repeats: true) { [weak self] _ in
-            self?.webSocket?.sendPing { error in
-                if error != nil { self?.handleDisconnect() }
-            }
-        }
-    }
-    
     func sendMessage(to targetID: String, text: String) {
         let msgJSON = "{\"type\": \"private_msg\", \"to_id\": \"\(targetID)\", \"text\": \"\(text)\"}"
         webSocket?.send(.string(msgJSON)) { [weak self] error in
@@ -57,6 +49,29 @@ class MeshNetworkManager: NSObject, ObservableObject {
                     self?.messages.append(newMsg)
                     self?.saveContact(id: targetID)
                 }
+            }
+        }
+    }
+
+    // Тот самый метод для удаления аккаунта (App Store Requirement)
+    func deleteAccountRequest() {
+        let deleteMsg = "{\"type\": \"delete_account\", \"my_id\": \"\(myHQID)\"}"
+        webSocket?.send(.string(deleteMsg)) { _ in
+            self.webSocket?.cancel(with: .goingAway, reason: nil)
+            DispatchQueue.main.async {
+                self.connectionState = .disconnected
+                // Чистим локальные данные
+                UserDefaults.standard.removeObject(forKey: "myHQID")
+                UserDefaults.standard.set(false, forKey: "isRegistered")
+            }
+        }
+    }
+    
+    private func startHeartbeat() {
+        pingTimer?.invalidate()
+        pingTimer = Timer.scheduledTimer(withTimeInterval: 15.0, repeats: true) { [weak self] _ in
+            self?.webSocket?.sendPing { error in
+                if error != nil { self?.handleDisconnect() }
             }
         }
     }
@@ -84,8 +99,7 @@ class MeshNetworkManager: NSObject, ObservableObject {
             let newMsg = ChatMessage(text: msgText, isMe: false, partnerId: senderId, timestamp: Date())
             self.messages.append(newMsg)
             self.saveContact(id: senderId)
-            let generator = UINotificationFeedbackGenerator()
-            generator.notificationOccurred(.success)
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
         }
     }
     
