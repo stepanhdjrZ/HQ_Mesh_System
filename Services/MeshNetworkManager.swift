@@ -99,7 +99,7 @@ class MeshNetworkManager: NSObject, ObservableObject {
     
     private func saveContact(id: String) {
         if !contacts.contains(where: { $0.hqId == id }) {
-            contacts.append(Contact(hqId: id, name: "Узел \(id.prefix(4))", lastMessageDate: Date()))
+            contacts.append(Contact(hqId: id, name: "Node \(id.prefix(4))", lastMessageDate: Date()))
         }
     }
     
