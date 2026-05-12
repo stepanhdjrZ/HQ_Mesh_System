@@ -2,6 +2,26 @@ import Foundation
 import MultipeerConnectivity
 import SwiftUI
 
+// --- МОДЕЛИ ДАННЫХ (Теперь они здесь, чтобы ничего не терялось) ---
+struct ChatMessage: Identifiable, Codable {
+    var id = UUID()
+    let text: String
+    let isMe: Bool
+    let partnerId: String
+    let timestamp: Date
+    var timeString: String {
+        let formatter = DateFormatter(); formatter.dateFormat = "HH:mm"
+        return formatter.string(from: timestamp)
+    }
+}
+
+struct Contact: Identifiable, Codable {
+    var id = UUID()
+    let hqId: String
+    let name: String
+    let lastMessageDate: Date
+}
+
 class MeshNetworkManager: NSObject, ObservableObject {
     @Published var connectionState: ConnectionState = .disconnected
     @Published var messages: [ChatMessage] = []
@@ -12,7 +32,6 @@ class MeshNetworkManager: NSObject, ObservableObject {
     @Published var myNickname: String = ""
     @Published var hasAccess = false
     
-    // Состояния для процесса регистрации
     @Published var authStep: AuthStep = .enterEmail
     @Published var isWaitingForServer = false
     @Published var authError = ""
@@ -31,11 +50,10 @@ class MeshNetworkManager: NSObject, ObservableObject {
         super.init()
         loadData()
         setupMesh()
-        connectToHQ()
+        if hasAccess { connectToHQ() }
     }
 
-    // --- АВТОРИЗАЦИЯ ЧЕРЕЗ РЕАЛЬНЫЙ СЕРВЕР ---
-    
+    // --- АВТОРИЗАЦИЯ ---
     func requestEmailCode(email: String) {
         isWaitingForServer = true
         sendJSON(["type": "request_code", "email": email])
@@ -45,25 +63,23 @@ class MeshNetworkManager: NSObject, ObservableObject {
         isWaitingForServer = true
         sendJSON([
             "type": "verify_and_register",
-            "email": email,
-            "code": code,
-            "username": username,
-            "nickname": nickname,
+            "email": email, "code": code,
+            "username": username, "nickname": nickname,
             "hq_id": myHQID
         ])
     }
 
-    // --- СЕТЕВАЯ ЛОГИКА ---
-
+    // --- СЕТЬ ---
     func connectToHQ() {
+        DispatchQueue.main.async { self.connectionState = .connecting }
         let url = URL(string: "wss://elevation-strength-authentic.ngrok-free.dev/ws")!
-        webSocket = URLSession.shared.webSocketTask(with: url)
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 10
+        webSocket = URLSession.shared.webSocketTask(with: request)
         webSocket?.resume()
-        listenWS()
         
-        if hasAccess {
-            sendJSON(["type": "register", "my_id": myHQID])
-        }
+        if hasAccess { sendJSON(["type": "register", "my_id": myHQID]) }
+        listenWS()
     }
 
     private func listenWS() {
@@ -75,7 +91,7 @@ class MeshNetworkManager: NSObject, ObservableObject {
                 DispatchQueue.main.async { self?.connectionState = .connected }
             case .failure:
                 DispatchQueue.main.async { self?.connectionState = .meshOnly }
-                self.reconnect()
+                self?.reconnect()
             }
         }
     }
@@ -95,20 +111,13 @@ class MeshNetworkManager: NSObject, ObservableObject {
             else if type == "auth_success" {
                 self.hasAccess = true
                 UserDefaults.standard.set(true, forKey: "isRegistered")
-                // Сохраняем профиль локально
                 UserDefaults.standard.set(self.myUsername, forKey: "myUsername")
                 UserDefaults.standard.set(self.myNickname, forKey: "myNickname")
             }
-            else if type == "auth_error" {
-                self.authError = json["text"] as? String ?? "Ошибка"
-            }
-            else if type == "msg" {
-                self.parseMessage(json)
-            }
+            else if type == "auth_error" { self.authError = json["text"] as? String ?? "Ошибка" }
+            else if type == "msg" { self.parseMessage(json) }
         }
     }
-
-    // --- MESH & MESSAGING ---
 
     func sendMessage(to targetID: String, text: String) {
         let payload: [String: Any] = ["type": "private_msg", "to_id": targetID, "text": text]
@@ -117,8 +126,9 @@ class MeshNetworkManager: NSObject, ObservableObject {
         if let data = try? JSONSerialization.data(withJSONObject: payload) {
             try? session.send(data, toPeers: session.connectedPeers, with: .reliable)
         }
-        
-        messages.append(ChatMessage(text: text, isMe: true, partnerId: targetID, timestamp: Date()))
+        DispatchQueue.main.async {
+            self.messages.append(ChatMessage(text: text, isMe: true, partnerId: targetID, timestamp: Date()))
+        }
     }
 
     private func sendJSON(_ dict: [String: Any]) {
@@ -128,6 +138,7 @@ class MeshNetworkManager: NSObject, ObservableObject {
         }
     }
 
+    // --- MESH CORE ---
     private func setupMesh() {
         myPeerID = MCPeerID(displayName: myHQID)
         session = MCSession(peer: myPeerID, securityIdentity: nil, encryptionPreference: .required)
@@ -146,7 +157,16 @@ class MeshNetworkManager: NSObject, ObservableObject {
             if !contacts.contains(where: { $0.hqId == senderId }) {
                 contacts.append(Contact(hqId: senderId, name: "Node \(senderId.prefix(4))", lastMessageDate: Date()))
             }
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
         }
+    }
+
+    func deleteAccountRequest() {
+        UserDefaults.standard.removeObject(forKey: "isRegistered")
+        UserDefaults.standard.removeObject(forKey: "myHQID")
+        self.hasAccess = false
+        self.authStep = .enterEmail
+        self.loadData()
     }
 
     private func reconnect() {
@@ -157,7 +177,6 @@ class MeshNetworkManager: NSObject, ObservableObject {
         self.hasAccess = UserDefaults.standard.bool(forKey: "isRegistered")
         self.myUsername = UserDefaults.standard.string(forKey: "myUsername") ?? ""
         self.myNickname = UserDefaults.standard.string(forKey: "myNickname") ?? ""
-        
         if let savedID = UserDefaults.standard.string(forKey: "myHQID") { self.myHQID = savedID }
         else {
             let newID = "HQ-\(UUID().uuidString.prefix(5))"
