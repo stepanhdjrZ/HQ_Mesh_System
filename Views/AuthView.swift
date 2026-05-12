@@ -2,84 +2,99 @@ import SwiftUI
 
 struct AuthView: View {
     @EnvironmentObject var meshManager: MeshNetworkManager
-    @State private var phone = ""
+    @State private var email = ""
     @State private var code = ""
-    @State private var isCodeSent = false
-    @State private var isLoading = false
-    @State private var errorMessage = ""
+    @State private var username = ""
+    @State private var nickname = ""
 
     var body: some View {
         ZStack {
-            // ФОНОВЫЙ ГРАДИЕНТ
-            LinearGradient(gradient: Gradient(colors: [Color.black, Color(red: 0.1, green: 0.2, blue: 0.3)]), startPoint: .top, endPoint: .bottom).ignoresSafeArea()
+            LinearGradient(colors: [Color(red: 0.05, green: 0.05, blue: 0.1), .black], startPoint: .top, endPoint: .bottom).ignoresSafeArea()
             
             VStack(spacing: 30) {
-                // ЛОГОТИП И ТИТЛ
+                // Header
                 VStack(spacing: 15) {
-                    Image("Mesh_Logo").resizable().scaledToFit().frame(width: 100, height: 100).cornerRadius(20)
-                    Text("HQ Global Mesh").font(.system(size: 32, weight: .bold)).foregroundColor(.white)
-                    Text("Построй свою независимую связь").font(.headline).foregroundColor(.gray).multilineTextAlignment(.center)
+                    Image(systemName: "hexagon.fill").font(.system(size: 80)).foregroundColor(.blue).shadow(color: .blue.opacity(0.5), radius: 20)
+                    Text("HQ Global").font(.system(size: 34, weight: .black)).foregroundColor(.white)
+                    Text(subtitle).font(.subheadline).foregroundColor(.gray).multilineTextAlignment(.center)
                 }
-                .padding(.top, 50)
+                .padding(.top, 60)
                 
-                // ПОЛЯ ВВОДА
+                // Content based on Step
                 VStack(spacing: 20) {
-                    if !isCodeSent {
-                        // ВВОД НОМЕРА
-                        TextfieldCard(icon: "phone.fill", placeholder: "Номер телефона", text: $phone)
-                    } else {
-                        // ВВОД КОДА
-                        TextfieldCard(icon: "key.fill", placeholder: "Код из СМС", text: $code)
+                    if meshManager.authStep == .enterEmail {
+                        AuthField(icon: "envelope.fill", placeholder: "Ваш Email", text: $email, keyboard: .emailAddress)
+                    } else if meshManager.authStep == .enterCode {
+                        AuthField(icon: "key.fill", placeholder: "Код из письма", text: $code, keyboard: .numberPad)
+                    } else if meshManager.authStep == .setupProfile {
+                        AuthField(icon: "at", placeholder: "username", text: $username, keyboard: .default)
+                        AuthField(icon: "person.fill", placeholder: "Имя (Nickname)", text: $nickname, keyboard: .default)
                     }
                 }
-                .padding(.horizontal)
+                .padding(.horizontal, 30)
                 
-                if !errorMessage.isEmpty { Text(errorMessage).foregroundColor(.red).font(.caption) }
+                if !meshManager.authError.isEmpty {
+                    Text(meshManager.authError).foregroundColor(.red).font(.caption).padding(.horizontal)
+                }
                 
-                // КНОПКА
+                // Action Button
                 Button(action: handleAction) {
                     ZStack {
-                        if isLoading { ProgressView().tint(.white) }
-                        else { Text(isCodeSent ? "Вход" : "Получить код").bold().foregroundColor(.white) }
+                        if meshManager.isWaitingForServer { ProgressView().tint(.white) }
+                        else { Text(buttonTitle).bold().foregroundColor(.white) }
                     }
-                    .frame(maxWidth: .infinity).padding().background(Color.blue).cornerRadius(12)
+                    .frame(maxWidth: .infinity).padding().background(Color.blue).cornerRadius(15).shadow(color: .blue.opacity(0.3), radius: 10)
                 }
-                .padding(.horizontal).padding(.top, 10).disabled(isLoading)
+                .padding(.horizontal, 30).disabled(meshManager.isWaitingForServer)
                 
                 Spacer()
             }
         }
     }
     
-    // ЛОГИКА GODMODE ВХОДА (Любой номер, код 1234)
+    private var subtitle: String {
+        switch meshManager.authStep {
+        case .enterEmail: return "Введите почту для получения кода доступа"
+        case .enterCode: return "Мы отправили секретный код на \(email)"
+        case .setupProfile: return "Последний шаг: создайте свой уникальный профиль"
+        }
+    }
+    
+    private var buttonTitle: String {
+        switch meshManager.authStep {
+        case .enterEmail: return "Получить код"
+        case .enterCode: return "Подтвердить"
+        case .setupProfile: return "Войти в Империю"
+        }
+    }
+    
     private func handleAction() {
-        errorMessage = ""
-        isLoading = true
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        meshManager.authError = ""
+        let generator = UIImpactFeedbackGenerator(style: .medium)
+        generator.impactOccurred()
         
-        if !isCodeSent {
-            meshManager.requestSMSCode(for: phone) { success in
-                self.isLoading = false
-                self.isCodeSent = success
-            }
-        } else {
-            meshManager.verifyCode(code) { success in
-                self.isLoading = false
-                if !success { self.errorMessage = "Неверный код. Попробуйте \(MockSMS.code)." }
-            }
+        switch meshManager.authStep {
+        case .enterEmail:
+            meshManager.requestEmailCode(email: email)
+        case .enterCode:
+            // Переход к профилю локально, регистрация будет на след. шаге
+            meshManager.authStep = .setupProfile
+        case .setupProfile:
+            meshManager.myUsername = username
+            meshManager.myNickname = nickname
+            meshManager.registerUser(email: email, code: code, username: username, nickname: nickname)
         }
     }
 }
 
-struct TextfieldCard: View {
-    let icon: String; let placeholder: String; @Binding var text: String
+struct AuthField: View {
+    let icon: String; let placeholder: String; @Binding var text: String; let keyboard: UIKeyboardType
     var body: some View {
         HStack {
             Image(systemName: icon).foregroundColor(.blue).frame(width: 30)
             TextField("", text: $text, prompt: Text(placeholder).foregroundColor(.gray))
-                .foregroundColor(.white).keyboardType(.phonePad)
+                .foregroundColor(.white).keyboardType(keyboard).autocapitalization(.none)
         }
-        .padding().background(Color.white.opacity(0.1)).cornerRadius(12)
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.1), lineWidth: 1))
+        .padding().background(Color.white.opacity(0.05)).cornerRadius(12).overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.1), lineWidth: 1))
     }
 }
