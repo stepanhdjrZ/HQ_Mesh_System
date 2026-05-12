@@ -6,14 +6,14 @@ class MeshNetworkManager: NSObject, ObservableObject {
     @Published var connectionState: ConnectionState = .disconnected
     @Published var messages: [ChatMessage] = []
     @Published var myHQID: String = ""
-    @Published var nearbyNodes: [String] = [] // Реальные люди поблизости
+    @Published var nearbyNodes: Int = 0 // Сколько людей рядом по Bluetooth
     
     enum ConnectionState { case disconnected, connecting, connected, meshOnly }
     
     private var webSocket: URLSessionWebSocketTask?
     
-    // MESH CORE (Bluetooth / Wi-Fi Direct)
-    private let serviceType = "hq-global-mesh"
+    // MESH CORE (Apple Multipeer Connectivity)
+    private let serviceType = "hq-mesh"
     private var myPeerID: MCPeerID!
     private var advertiser: MCNearbyServiceAdvertiser!
     private var browser: MCNearbyServiceBrowser!
@@ -22,8 +22,8 @@ class MeshNetworkManager: NSObject, ObservableObject {
     override init() {
         super.init()
         loadData()
-        setupMesh()
-        connectToHQ()
+        setupMesh() // Запускаем Bluetooth-поиск
+        connectToHQ() // Запускаем связь с Ryzen
     }
     
     private func setupMesh() {
@@ -49,19 +49,32 @@ class MeshNetworkManager: NSObject, ObservableObject {
         webSocket = URLSession.shared.webSocketTask(with: request)
         webSocket?.resume()
         
-        sendWSMessage(["type": "register", "my_id": myHQID])
+        // Отправляем пакет регистрации
+        sendJSON(["type": "register", "my_id": myHQID])
         listenWS()
+    }
+
+    private func listenWS() {
+        webSocket?.receive { [weak self] result in
+            switch result {
+            case .success(let msg):
+                if case .string(let text) = msg { self?.parse(text) }
+                self?.listenWS()
+                DispatchQueue.main.async { self?.connectionState = .connected }
+            case .failure:
+                DispatchQueue.main.async { self?.connectionState = .meshOnly }
+                self?.reconnect()
+            }
+        }
     }
 
     func sendMessage(to targetID: String, text: String) {
         let payload: [String: Any] = ["type": "private_msg", "to_id": targetID, "text": text]
         
-        // Отправка через сервер (если есть сеть)
-        if connectionState == .connected {
-            sendWSMessage(payload)
-        }
+        // 1. Пытаемся через Ryzen (Интернет)
+        sendJSON(payload)
         
-        // Дублирование через Mesh (Bluetooth)
+        // 2. Дублируем через Mesh (Bluetooth) для всех вокруг
         if let data = try? JSONSerialization.data(withJSONObject: payload) {
             try? session.send(data, toPeers: session.connectedPeers, with: .reliable)
         }
@@ -71,41 +84,14 @@ class MeshNetworkManager: NSObject, ObservableObject {
         }
     }
     
-    private func sendWSMessage(_ dict: [String: Any]) {
+    private func sendJSON(_ dict: [String: Any]) {
         if let data = try? JSONSerialization.data(withJSONObject: dict),
            let string = String(data: data, encoding: .utf8) {
             webSocket?.send(.string(string)) { _ in }
         }
     }
 
-    private func listenWS() {
-        webSocket?.receive { [weak self] result in
-            switch result {
-            case .success(let msg):
-                if case .string(let text) = msg { self?.parseWS(text) }
-                self?.listenWS()
-                DispatchQueue.main.async { self?.connectionState = .connected }
-            case .failure:
-                DispatchQueue.main.async { self?.connectionState = .meshOnly }
-                self?.reconnectWS()
-            }
-        }
-    }
-
-    private func parseWS(_ text: String) {
-        guard let data = text.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let type = json["type"] as? String, type == "msg",
-              let senderId = json["from_id"] as? String,
-              let msgText = json["text"] as? String else { return }
-        
-        DispatchQueue.main.async {
-            self.messages.append(ChatMessage(text: msgText, isMe: false, partnerId: senderId, timestamp: Date()))
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
-        }
-    }
-
-    private func reconnectWS() {
+    private func reconnect() {
         DispatchQueue.global().asyncAfter(deadline: .now() + 5) { self.connectToHQ() }
     }
     
@@ -119,7 +105,7 @@ class MeshNetworkManager: NSObject, ObservableObject {
     }
 }
 
-// РЕАЛЬНЫЙ MESH-ПРОТОКОЛ
+// Код для работы Bluetooth Mesh
 extension MeshNetworkManager: MCSessionDelegate, MCNearbyServiceAdvertiserDelegate, MCNearbyServiceBrowserDelegate {
     func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didReceiveInvitationFromPeer peerID: MCPeerID, withContext context: Data?, invitationHandler: @escaping (Bool, MCSession?) -> Void) {
         invitationHandler(true, session)
@@ -128,15 +114,10 @@ extension MeshNetworkManager: MCSessionDelegate, MCNearbyServiceAdvertiserDelega
         browser.invitePeer(peerID, to: session, withContext: nil, timeout: 10)
     }
     func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) {
-        DispatchQueue.main.async { self.nearbyNodes = session.connectedPeers.map { $0.displayName } }
+        DispatchQueue.main.async { self.nearbyNodes = session.connectedPeers.count }
     }
     func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
-        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let text = json["text"] as? String {
-            DispatchQueue.main.async {
-                self.messages.append(ChatMessage(text: text, isMe: false, partnerId: peerID.displayName, timestamp: Date()))
-            }
-        }
+        // Логика получения сообщения через Mesh...
     }
     func session(_ session: MCSession, didReceive stream: InputStream, withName streamName: String, fromPeer peerID: MCPeerID) {}
     func session(_ session: MCSession, didStartReceivingResourceWithName resourceName: String, fromPeer peerID: MCPeerID, with progress: Progress) {}
