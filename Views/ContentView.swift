@@ -7,116 +7,118 @@ struct ContentView: View {
     
     var body: some View {
         TabView {
-            // --- ВКЛАДКА ЧАТЫ ---
+            // --- ЧАТЫ ---
             NavigationView {
-                VStack(spacing: 0) {
-                    List {
-                        if meshManager.contacts.isEmpty {
-                            VStack(spacing: 20) {
-                                Image(systemName: "message.circle.fill")
-                                    .font(.system(size: 60))
-                                    .foregroundColor(.gray.opacity(0.3))
-                                Text("У вас пока нет чатов")
-                                    .font(.headline)
-                                    .foregroundColor(.gray)
-                                Text("Отсканируйте QR-код друга в разделе Контакты, чтобы начать.")
-                                    .font(.subheadline)
-                                    .multilineTextAlignment(.center)
-                                    .foregroundColor(.gray)
-                                    .padding(.horizontal)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                            .padding(.top, 100)
-                        } else {
-                            ForEach(meshManager.contacts) { contact in
-                                NavigationLink(destination: ChatView(contactID: contact.hqId).environmentObject(meshManager)) {
-                                    ChatListRow(contact: contact)
+                ZStack {
+                    Color(UIColor.systemGroupedBackground).edgesIgnoringSafeArea(.all)
+                    
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            if meshManager.contacts.isEmpty {
+                                EmptyStateView()
+                            } else {
+                                ForEach(meshManager.contacts) { contact in
+                                    NavigationLink(destination: ChatView(contactID: contact.hqId).environmentObject(meshManager)) {
+                                        ChatRow(contact: contact)
+                                    }
+                                    Divider().padding(.leading, 80)
                                 }
                             }
                         }
+                        .background(Color(UIColor.systemBackground))
                     }
-                    .listStyle(PlainListStyle())
                 }
-                .navigationTitle("")
+                .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    ToolbarItem(placement: .navigationBarLeading) { Button("Изм.") {}.foregroundColor(.blue) }
-                    ToolbarItem(placement: .navigationBarTrailing) { Image(systemName: "square.and.pencil").foregroundColor(.blue) }
-                    
-                    // Центральный статус
                     ToolbarItem(placement: .principal) {
-                        VStack(spacing: 0) {
-                            Text("Чаты").font(.system(size: 17, weight: .semibold))
+                        VStack {
+                            Text("Чаты").font(.headline)
                             Text(meshManager.connectionState == .connected ? "в сети" : "обновление...")
-                                .font(.system(size: 12))
-                                .foregroundColor(meshManager.connectionState == .connected ? .gray : .blue)
+                                .font(.caption2)
+                                .foregroundColor(meshManager.connectionState == .connected ? .blue : .gray)
                         }
                     }
+                    ToolbarItem(placement: .navigationBarLeading) { Button("Изм.") {}.foregroundColor(.blue) }
+                    ToolbarItem(placement: .navigationBarTrailing) { Image(systemName: "square.and.pencil").foregroundColor(.blue) }
                 }
             }
             .tabItem { Label("Чаты", systemImage: "message.fill") }
             
-            // --- ВКЛАДКА КОНТАКТЫ ---
+            // --- КОНТАКТЫ ---
             NavigationView {
                 List {
                     Button(action: { showingScanner = true }) {
                         HStack(spacing: 15) {
-                            Image(systemName: "qrcode.viewfinder").font(.title2).foregroundColor(.blue)
-                            Text("Добавить контакт по QR").font(.headline).foregroundColor(.blue)
+                            Image(systemName: "qrcode.viewfinder").font(.title2)
+                            Text("Добавить узел по QR").font(.headline)
                         }
-                        .padding(.vertical, 8)
-                    }
+                    }.foregroundColor(.blue)
                     
-                    Section(header: Text("МОИ УЗЛЫ")) {
+                    Section(header: Text("МОИ КОНТАКТЫ")) {
                         ForEach(meshManager.contacts) { contact in
                             HStack {
-                                Circle().fill(Color.gray.opacity(0.2)).frame(width: 35, height: 35)
-                                    .overlay(Text(String(contact.hqId.prefix(1))).font(.caption).bold())
-                                Text(contact.hqId).font(.system(size: 17))
+                                ContactAvatar(id: contact.hqId, size: 35)
+                                Text(contact.hqId)
                             }
                         }
                     }
                 }
                 .navigationTitle("Контакты")
-                .sheet(isPresented: $showingScanner) {
-                    QRScannerView { result in
-                        if result.contains("HQ-") { scannedID = result; showingScanner = false }
-                    }
-                }
-                .background(
-                    NavigationLink(destination: ChatView(contactID: scannedID ?? "").environmentObject(meshManager), 
-                                   isActive: Binding(get: { scannedID != nil }, set: { if !$0 { scannedID = nil } })) { EmptyView() }
-                )
             }
             .tabItem { Label("Контакты", systemImage: "person.circle.fill") }
             
-            // --- ВКЛАДКА НАСТРОЙКИ ---
+            // --- НАСТРОЙКИ ---
             SettingsView().environmentObject(meshManager)
                 .tabItem { Label("Настройки", systemImage: "gearshape.fill") }
+        }
+        .onAppear {
+            // Делаем таб-бар полупрозрачным как в ТГ
+            let appearance = UITabBarAppearance()
+            appearance.configureWithDefaultBackground()
+            UITabBar.appearance().scrollEdgeAppearance = appearance
         }
     }
 }
 
-// Отдельная строка чата в стиле ТГ
-struct ChatListRow: View {
+// Красивая строка чата
+struct ChatRow: View {
     let contact: Contact
     var body: some View {
-        HStack(spacing: 12) {
-            Circle()
-                .fill(LinearGradient(gradient: Gradient(colors: [.blue, .purple]), startPoint: .topLeading, endPoint: .bottomTrailing))
-                .frame(width: 55, height: 55)
-                .overlay(Text(String(contact.hqId.prefix(1))).font(.title3).bold().foregroundColor(.white))
+        HStack(spacing: 15) {
+            ContactAvatar(id: contact.hqId, size: 60)
             
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text(contact.hqId).font(.system(size: 17, weight: .semibold))
+                    Text(contact.hqId).font(.system(size: 17, weight: .semibold)).foregroundColor(.primary)
                     Spacer()
-                    Text("19:45").font(.system(size: 14)).foregroundColor(.gray)
+                    Text("17:42").font(.system(size: 14)).foregroundColor(.gray)
                 }
-                Text("Зашифрованный туннель активен...").font(.system(size: 15)).foregroundColor(.gray).lineLimit(1)
+                Text("Зашифрованный пакет доставлен...").font(.system(size: 15)).foregroundColor(.gray).lineLimit(1)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.horizontal, 15)
+        .padding(.vertical, 10)
+    }
+}
+
+struct ContactAvatar: View {
+    let id: String
+    let size: CGFloat
+    var body: some View {
+        Circle()
+            .fill(LinearGradient(gradient: Gradient(colors: [.blue, .purple]), startPoint: .topLeading, endPoint: .bottomTrailing))
+            .frame(width: size, height: size)
+            .overlay(Text(String(id.prefix(1))).foregroundColor(.white).font(.system(size: size/2, weight: .bold)))
+    }
+}
+
+struct EmptyStateView: View {
+    var body: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "bolt.shield.fill").font(.system(size: 80)).foregroundColor(.blue.opacity(0.2))
+            Text("HQ Mesh Global").font(.title2).bold()
+            Text("Ваша сеть пуста. Добавьте первый узел через QR-код друга.").multilineTextAlignment(.center).foregroundColor(.gray).padding(.horizontal, 50)
+        }
+        .padding(.top, 100)
     }
 }
