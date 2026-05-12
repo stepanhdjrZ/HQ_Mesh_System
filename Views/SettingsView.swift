@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject var meshManager: MeshNetworkManager
+    @State private var showQR = false
     
     var body: some View {
         ZStack {
@@ -9,46 +10,60 @@ struct SettingsView: View {
             
             VStack(spacing: 20) {
                 // Header
-                VStack {
+                VStack(spacing: 12) {
                     Circle()
-                        .fill(LinearGradient(colors: [.blue, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
-                        .frame(width: 100, height: 100)
+                        .fill(LinearGradient(colors: [.blue, .cyan], startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 90, height: 90)
                         .overlay(Text(String(meshManager.myHQID.prefix(1))).font(.system(size: 40, weight: .bold)).foregroundColor(.white))
-                        .shadow(radius: 10)
+                        .shadow(color: .blue.opacity(0.3), radius: 10)
                     
-                    Text("Основатель HQ").font(.title2).bold()
-                    Text("ID: \(meshManager.myHQID)").foregroundColor(.gray)
+                    Text("Основатель HQ").font(.title3).bold()
+                    Text("ID: \(meshManager.myHQID)").font(.subheadline).foregroundColor(.gray)
                 }
-                .padding(.top, 40)
+                .padding(.top, 30)
 
-                // Status Card
-                VStack(spacing: 0) {
-                    StatusRow(title: "Штаб (Ryzen)", status: meshManager.connectionState == .connected ? "В сети" : "Поиск...", color: meshManager.connectionState == .connected ? .green : .orange)
-                    Divider().padding(.leading, 50)
-                    StatusRow(title: "Mesh (P2P)", status: "\(meshManager.nearbyDevices.count) узлов рядом", color: .blue)
+                // Cards
+                VStack(spacing: 1) {
+                    StatusRow(icon: "server.rack.fill", title: "Центральный Штаб", status: meshManager.connectionState == .connected ? "В сети" : "Поиск...", color: meshManager.connectionState == .connected ? .green : .orange)
+                    StatusRow(icon: "antenna.radiowaves.left.and.right", title: "Mesh-сеть (P2P)", status: meshManager.nearbyNodes == 0 ? "Один в сети" : "\(meshManager.nearbyNodes) узла рядом", color: .blue)
                 }
                 .background(Color(UIColor.secondarySystemGroupedBackground))
-                .cornerRadius(15)
+                .cornerRadius(16)
                 .padding(.horizontal)
+
+                Button(action: { showQR = true }) {
+                    HStack {
+                        Image(systemName: "qrcode").font(.title2)
+                        Text("Мой Mesh-код").bold()
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.caption).foregroundColor(.gray)
+                    }
+                    .padding()
+                    .background(Color(UIColor.secondarySystemGroupedBackground))
+                    .cornerRadius(16)
+                    .padding(.horizontal)
+                }
 
                 Spacer()
             }
         }
+        .navigationTitle("Настройки")
     }
 }
 
 struct StatusRow: View {
+    let icon: String
     let title: String
     let status: String
     let color: Color
     
     var body: some View {
-        HStack {
-            Image(systemName: "antenna.radiowaves.left.and.right")
+        HStack(spacing: 15) {
+            Image(systemName: icon)
                 .foregroundColor(.white)
                 .padding(8)
                 .background(color)
-                .cornerRadius(8)
+                .cornerRadius(10)
             
             Text(title)
             Spacer()
