@@ -7,7 +7,6 @@ struct ChatMessage: Identifiable, Codable, Equatable {
     let partnerId: String
     let timestamp: Date
     
-    // Форматируем время как "14:05"
     var timeString: String {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm"
