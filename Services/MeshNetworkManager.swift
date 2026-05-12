@@ -1,56 +1,68 @@
 import Foundation
 import SwiftUI
 
-struct ChatMessage: Identifiable, Equatable {
-    let id = UUID()
-    let text: String
-    let isMe: Bool
-    let partnerId: String // С кем переписываемся
-}
-
 class MeshNetworkManager: NSObject, ObservableObject {
-    @Published var isConnected = false
+    @Published var connectionState: ConnectionState = .disconnected
     @Published var messages: [ChatMessage] = []
-    
-    // Твой уникальный ID (генерируется один раз и сохраняется)
+    @Published var contacts: [Contact] = []
     @Published var myHQID: String = ""
     
+    enum ConnectionState {
+        case disconnected, connecting, connected
+    }
+    
     private var webSocket: URLSessionWebSocketTask?
+    private var pingTimer: Timer?
     
     override init() {
         super.init()
-        // Достаем ID из памяти телефона или создаем новый (например, HQ-8493)
-        if let savedID = UserDefaults.standard.string(forKey: "myHQID") {
-            self.myHQID = savedID
-        } else {
-            let newID = "HQ-\(Int.random(in: 1000...9999))"
-            UserDefaults.standard.set(newID, forKey: "myHQID")
-            self.myHQID = newID
-        }
+        loadData()
         connectToHQ()
     }
     
+    // Подключение к твоему серверу Ryzen через Cloudflare
     func connectToHQ() {
+        DispatchQueue.main.async { self.connectionState = .connecting }
+        
         let url = URL(string: "wss://hq-mesh.site/ws")!
-        let session = URLSession(configuration: .default)
-        webSocket = session.webSocketTask(with: url)
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 10
+        
+        webSocket = URLSession.shared.webSocketTask(with: request)
         webSocket?.resume()
         
         let registerMsg = "{\"type\": \"register\", \"my_id\": \"\(myHQID)\"}"
         webSocket?.send(.string(registerMsg)) { error in
             if error == nil {
-                DispatchQueue.main.async { self.isConnected = true }
+                DispatchQueue.main.async { self.connectionState = .connected }
                 self.listen()
+                self.startHeartbeat()
+            } else {
+                self.handleDisconnect()
             }
         }
     }
     
-    // Отправка конкретному контакту (по его ID)
+    // Пинг каждые 15 секунд, чтобы Cloudflare не обрывал туннель
+    private func startHeartbeat() {
+        pingTimer?.invalidate()
+        pingTimer = Timer.scheduledTimer(withTimeInterval: 15.0, repeats: true) { [weak self] _ in
+            self?.webSocket?.sendPing { error in
+                if error != nil { self?.handleDisconnect() }
+            }
+        }
+    }
+    
     func sendMessage(to targetID: String, text: String) {
         let msgJSON = "{\"type\": \"private_msg\", \"to_id\": \"\(targetID)\", \"text\": \"\(text)\"}"
-        webSocket?.send(.string(msgJSON)) { _ in
-            DispatchQueue.main.async {
-                self.messages.append(ChatMessage(text: text, isMe: true, partnerId: targetID))
+        webSocket?.send(.string(msgJSON)) { [weak self] error in
+            if error == nil {
+                DispatchQueue.main.async {
+                    let newMsg = ChatMessage(text: text, isMe: true, partnerId: targetID, timestamp: Date())
+                    self?.messages.append(newMsg)
+                    self?.saveContact(id: targetID)
+                    self?.saveData()
+                }
             }
         }
     }
@@ -62,8 +74,7 @@ class MeshNetworkManager: NSObject, ObservableObject {
                 if case .string(let text) = msg { self?.parse(text) }
                 self?.listen()
             case .failure:
-                DispatchQueue.main.async { self?.isConnected = false }
-                DispatchQueue.global().asyncAfter(deadline: .now() + 3.0) { self?.connectToHQ() }
+                self?.handleDisconnect()
             }
         }
     }
@@ -76,7 +87,44 @@ class MeshNetworkManager: NSObject, ObservableObject {
               let msgText = json["text"] as? String else { return }
         
         DispatchQueue.main.async {
-            self.messages.append(ChatMessage(text: msgText, isMe: false, partnerId: senderId))
+            let newMsg = ChatMessage(text: msgText, isMe: false, partnerId: senderId, timestamp: Date())
+            self.messages.append(newMsg)
+            self.saveContact(id: senderId)
+            self.saveData()
+            // Вибрация при получении
+            let generator = UINotificationFeedbackGenerator()
+            generator.notificationOccurred(.success)
         }
+    }
+    
+    private func handleDisconnect() {
+        DispatchQueue.main.async { self.connectionState = .disconnected }
+        pingTimer?.invalidate()
+        DispatchQueue.global().asyncAfter(deadline: .now() + 3.0) { [weak self] in
+            self?.connectToHQ()
+        }
+    }
+    
+    // --- РАБОТА С ПАМЯТЬЮ УСТРОЙСТВА ---
+    private func saveContact(id: String) {
+        if !contacts.contains(where: { $0.hqId == id }) {
+            contacts.append(Contact(hqId: id, name: "Contact \(id.prefix(4))", lastMessageDate: Date()))
+        }
+    }
+    
+    private func loadData() {
+        // Загружаем свой ID или создаем
+        if let savedID = UserDefaults.standard.string(forKey: "myHQID") {
+            self.myHQID = savedID
+        } else {
+            let newID = "HQ-\(UUID().uuidString.prefix(6))"
+            UserDefaults.standard.set(newID, forKey: "myHQID")
+            self.myHQID = newID
+        }
+        // В реальном проекте тут загрузка истории из CoreData
+    }
+    
+    private func saveData() {
+        // Заглушка для сохранения истории
     }
 }
