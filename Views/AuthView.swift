@@ -1,110 +1,85 @@
 import SwiftUI
 
 struct AuthView: View {
-    @Binding var isRegistered: Bool
-    @State private var step = 1 // 1: Телефон, 2: Код, 3: Почта
+    @EnvironmentObject var meshManager: MeshNetworkManager
     @State private var phone = ""
     @State private var code = ""
-    @State private var email = ""
+    @State private var isCodeSent = false
     @State private var isLoading = false
-    
+    @State private var errorMessage = ""
+
     var body: some View {
-        NavigationStack {
+        ZStack {
+            // ФОНОВЫЙ ГРАДИЕНТ
+            LinearGradient(gradient: Gradient(colors: [Color.black, Color(red: 0.1, green: 0.2, blue: 0.3)]), startPoint: .top, endPoint: .bottom).ignoresSafeArea()
+            
             VStack(spacing: 30) {
-                Spacer()
-                
+                // ЛОГОТИП И ТИТЛ
                 VStack(spacing: 15) {
-                    Image(systemName: step == 3 ? "envelope.badge.shield.half.filled" : "bolt.shield.fill")
-                        .font(.system(size: 70))
-                        .foregroundColor(.blue)
-                    
-                    Text(stepTitle)
-                        .font(.system(size: 28, weight: .bold))
-                    
-                    Text(stepSubTitle)
-                        .font(.subheadline)
-                        .foregroundColor(.gray)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 40)
+                    Image("Mesh_Logo").resizable().scaledToFit().frame(width: 100, height: 100).cornerRadius(20)
+                    Text("HQ Global Mesh").font(.system(size: 32, weight: .bold)).foregroundColor(.white)
+                    Text("Построй свою независимую связь").font(.headline).foregroundColor(.gray).multilineTextAlignment(.center)
                 }
+                .padding(.top, 50)
                 
-                VStack(spacing: 15) {
-                    if step == 1 {
-                        TextField("+7 999 000 00 00", text: $phone)
-                            .keyboardType(.phonePad)
-                            .modifier(AuthFieldModifier())
-                    } else if step == 2 {
-                        TextField("0000", text: $code)
-                            .keyboardType(.numberPad)
-                            .tracking(10)
-                            .modifier(AuthFieldModifier())
+                // ПОЛЯ ВВОДА
+                VStack(spacing: 20) {
+                    if !isCodeSent {
+                        // ВВОД НОМЕРА
+                        TextfieldCard(icon: "phone.fill", placeholder: "Номер телефона", text: $phone)
                     } else {
-                        TextField("Email (для восстановления)", text: $email)
-                            .keyboardType(.emailAddress)
-                            .autocapitalization(.none)
-                            .modifier(AuthFieldModifier())
-                    }
-                    
-                    Button(action: nextStep) {
-                        if isLoading {
-                            ProgressView().tint(.white)
-                        } else {
-                            Text(step == 3 ? "Завершить" : "Продолжить")
-                                .font(.headline)
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(Color.blue)
-                                .cornerRadius(12)
-                        }
+                        // ВВОД КОДА
+                        TextfieldCard(icon: "key.fill", placeholder: "Код из СМС", text: $code)
                     }
                 }
-                .padding(.horizontal, 40)
+                .padding(.horizontal)
+                
+                if !errorMessage.isEmpty { Text(errorMessage).foregroundColor(.red).font(.caption) }
+                
+                // КНОПКА
+                Button(action: handleAction) {
+                    ZStack {
+                        if isLoading { ProgressView().tint(.white) }
+                        else { Text(isCodeSent ? "Вход" : "Получить код").bold().foregroundColor(.white) }
+                    }
+                    .frame(maxWidth: .infinity).padding().background(Color.blue).cornerRadius(12)
+                }
+                .padding(.horizontal).padding(.top, 10).disabled(isLoading)
                 
                 Spacer()
             }
-            .background(Color(UIColor.systemBackground))
         }
     }
     
-    var stepTitle: String {
-        switch step {
-        case 1: return "Ваш номер"
-        case 2: return "Подтверждение"
-        default: return "Почта"
-        }
-    }
-    
-    var stepSubTitle: String {
-        switch step {
-        case 1: return "Введите номер телефона, чтобы создать свой уникальный HQ ID."
-        case 2: return "Мы отправили СМС с кодом. Пожалуйста, введите его ниже."
-        default: return "Привяжите почту, чтобы не потерять доступ к сети HQ Global."
-        }
-    }
-    
-    func nextStep() {
+    // ЛОГИКА GODMODE ВХОДА (Любой номер, код 1234)
+    private func handleAction() {
+        errorMessage = ""
         isLoading = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-            isLoading = false
-            withAnimation {
-                if step < 3 { step += 1 }
-                else { 
-                    UserDefaults.standard.set(true, forKey: "isRegistered")
-                    isRegistered = true 
-                }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        
+        if !isCodeSent {
+            meshManager.requestSMSCode(for: phone) { success in
+                self.isLoading = false
+                self.isCodeSent = success
+            }
+        } else {
+            meshManager.verifyCode(code) { success in
+                self.isLoading = false
+                if !success { self.errorMessage = "Неверный код. Попробуйте \(MockSMS.code)." }
             }
         }
     }
 }
 
-struct AuthFieldModifier: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .font(.title2)
-            .multilineTextAlignment(.center)
-            .padding()
-            .background(Color(UIColor.secondarySystemBackground))
-            .cornerRadius(12)
+struct TextfieldCard: View {
+    let icon: String; let placeholder: String; @Binding var text: String
+    var body: some View {
+        HStack {
+            Image(systemName: icon).foregroundColor(.blue).frame(width: 30)
+            TextField("", text: $text, prompt: Text(placeholder).foregroundColor(.gray))
+                .foregroundColor(.white).keyboardType(.phonePad)
+        }
+        .padding().background(Color.white.opacity(0.1)).cornerRadius(12)
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.1), lineWidth: 1))
     }
 }
