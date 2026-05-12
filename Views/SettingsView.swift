@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit // КРИТИЧНО ДЛЯ UICOLOR
 
 struct SettingsView: View {
     @EnvironmentObject var meshManager: MeshNetworkManager
