@@ -13,10 +13,11 @@ jobs:
         run: |
           xcrun --sdk iphoneos swiftc \
           HQApp.swift \
+          Models/Models.swift \
+          Services/MeshNetworkManager.swift \
           Views/ContentView.swift \
           Views/ChatView.swift \
-          Views/CameraView.swift \
-          Services/MeshNetworkManager.swift \
+          Views/QRScannerView.swift \
           -target arm64-apple-ios17.0 \
           -sdk $(xcrun --show-sdk-path --sdk iphoneos) \
           -swift-version 5 \
@@ -26,6 +27,7 @@ jobs:
           -framework AVFoundation \
           -framework PhotosUI \
           -framework MultipeerConnectivity \
+          -framework CoreImage \
           -emit-executable -o Messenger
 
       - name: Assemble
@@ -41,10 +43,10 @@ jobs:
             <key>CFBundleIdentifier</key><string>com.hq.globalmesh</string>
             <key>CFBundleName</key><string>HQ Global</string>
             <key>CFBundlePackageType</key><string>APPL</string>
-            <key>CFBundleShortVersionString</key><string>8.1</string>
+            <key>CFBundleShortVersionString</key><string>8.2</string>
             <key>MinimumOSVersion</key><string>17.0</string>
             <key>UILaunchScreen</key><dict/>
-            <key>NSCameraUsageDescription</key><string>Для видеозвонков и кружочков</string>
+            <key>NSCameraUsageDescription</key><string>Для сканирования QR-кодов и звонков</string>
             <key>NSMicrophoneUsageDescription</key><string>Для звонков и голосовых</string>
             <key>NSPhotoLibraryUsageDescription</key><string>Для отправки медиа</string>
             <key>NSLocalNetworkUsageDescription</key><string>Поиск узлов рядом</string>
@@ -57,5 +59,5 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: HQ-GodMode-v8-1
+          name: HQ-GodMode-v8-2
           path: Messenger.ipa
