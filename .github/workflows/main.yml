@@ -17,6 +17,7 @@ jobs:
           Views/ChatView.swift \
           Views/QRScannerView.swift \
           Views/SettingsView.swift \
+          Views/AuthView.swift \
           -target arm64-apple-ios17.0 \
           -sdk $(xcrun --show-sdk-path --sdk iphoneos) \
           -swift-version 5 \
@@ -37,7 +38,7 @@ jobs:
           <key>CFBundleIdentifier</key><string>com.hq.globalmesh</string>
           <key>CFBundleName</key><string>HQ Global</string>
           <key>CFBundlePackageType</key><string>APPL</string>
-          <key>CFBundleShortVersionString</key><string>9.1</string>
+          <key>CFBundleShortVersionString</key><string>9.5</string>
           <key>MinimumOSVersion</key><string>17.0</string>
           <key>NSCameraUsageDescription</key><string>QR Scan</string>
           </dict></plist>
@@ -46,5 +47,5 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: HQ-PRO-v9-1
+          name: HQ-PRO-v9-5
           path: Messenger.ipa
