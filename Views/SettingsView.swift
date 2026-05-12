@@ -8,20 +8,18 @@ struct SettingsView: View {
             Color(UIColor.systemGroupedBackground).ignoresSafeArea()
             
             VStack(spacing: 25) {
-                // Profile
                 VStack(spacing: 10) {
                     Circle()
                         .fill(LinearGradient(colors: [.blue, .cyan], startPoint: .topLeading, endPoint: .bottomTrailing))
                         .frame(width: 90, height: 90)
-                        .overlay(Text(String(meshManager.myNickname.prefix(1))).font(.title.bold()).foregroundColor(.white))
+                        .overlay(Text(firstLetter).font(.title.bold()).foregroundColor(.white))
                         .shadow(radius: 10)
                     
-                    Text(meshManager.myNickname).font(.title3).bold()
-                    Text("@\(meshManager.myUsername)").foregroundColor(.blue).font(.subheadline)
+                    Text(meshManager.myNickname.isEmpty ? "Основатель HQ" : meshManager.myNickname).font(.title3).bold()
+                    Text(meshManager.myUsername.isEmpty ? "ID: \(meshManager.myHQID)" : "@\(meshManager.myUsername)").foregroundColor(.blue).font(.subheadline)
                 }
                 .padding(.top, 40)
                 
-                // Stats Card
                 VStack(spacing: 0) {
                     StatusItem(title: "Центральный Штаб", status: meshManager.connectionState == .connected ? "В сети" : "Поиск...", color: meshManager.connectionState == .connected ? .green : .orange)
                     Divider().padding(.leading, 60)
@@ -31,16 +29,16 @@ struct SettingsView: View {
                 
                 Spacer()
                 
-                Button(role: .destructive, action: {
-                    UserDefaults.standard.set(false, forKey: "isRegistered")
-                    meshManager.hasAccess = false
-                }) {
-                    Text("Выйти из аккаунта").bold()
-                }
-                .padding(.bottom, 20)
+                Button(role: .destructive, action: { meshManager.deleteAccountRequest() }) {
+                    Text("Выйти из аккаунта и удалить данные").bold()
+                }.padding(.bottom, 20)
             }
         }
         .navigationTitle("Профиль")
+    }
+    
+    private var firstLetter: String {
+        return meshManager.myNickname.isEmpty ? "H" : String(meshManager.myNickname.prefix(1))
     }
 }
 
