@@ -2,14 +2,20 @@ import SwiftUI
 
 @main
 struct HQApp: App {
-    // Подключаем наш менеджер сети из папки Services
     @StateObject var meshManager = MeshNetworkManager()
+    
+    // Проверяем, проходил ли юзер регистрацию
+    @AppStorage("isRegistered") var isRegistered: Bool = false
     
     var body: some Scene {
         WindowGroup {
-            // Запускаем главный экран из папки Views
-            ContentView()
-                .environmentObject(meshManager)
+            if isRegistered {
+                ContentView()
+                    .environmentObject(meshManager)
+            } else {
+                AuthView(isRegistered: $isRegistered)
+                    .environmentObject(meshManager)
+            }
         }
     }
 }
