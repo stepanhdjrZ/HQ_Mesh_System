@@ -1,12 +1,15 @@
 import SwiftUI
-import UIKit
 
 struct ContentView: View {
-    @StateObject private var meshManager = MeshNetworkManager()
+    @StateObject var meshManager = MeshNetworkManager()
+    @State private var showScanner = false
     
     init() {
-        UITabBar.appearance().backgroundColor = UIColor(red: 0.01, green: 0.01, blue: 0.03, alpha: 1.0)
-        UITabBar.appearance().unselectedItemTintColor = UIColor.gray
+        let appearance = UITabBarAppearance()
+        appearance.configureWithOpaqueBackground()
+        appearance.backgroundColor = UIColor(red: 0.01, green: 0.01, blue: 0.03, alpha: 1.0)
+        UITabBar.appearance().standardAppearance = appearance
+        UITabBar.appearance().scrollEdgeAppearance = appearance
     }
     
     var body: some View {
@@ -14,110 +17,90 @@ struct ContentView: View {
             if !meshManager.hasAccess {
                 AuthView().environmentObject(meshManager)
             } else {
-                MainTabView().environmentObject(meshManager)
+                TabView {
+                    NavigationView {
+                        ChatListContainer(showScanner: $showScanner).environmentObject(meshManager)
+                    }
+                    .navigationViewStyle(StackNavigationViewStyle())
+                    .tabItem { Label("Сеть", systemImage: "bolt.horizontal.circle.fill") }
+                    
+                    NavigationView {
+                        SettingsView().environmentObject(meshManager)
+                    }
+                    .navigationViewStyle(StackNavigationViewStyle())
+                    .tabItem { Label("Штаб", systemImage: "cpu.fill") }
+                }.accentColor(.cyan)
             }
-        }.preferredColorScheme(.dark)
+        }
+        .preferredColorScheme(.dark)
+        .sheet(isPresented: $showScanner) {
+            QRScannerView { code in meshManager.handleExternalQR(code) }
+        }
     }
 }
 
-struct MainTabView: View {
+struct ChatListContainer: View {
     @EnvironmentObject var meshManager: MeshNetworkManager
-    var body: some View {
-        TabView {
-            NavigationView {
-                ChatListManager().environmentObject(meshManager)
-            }
-            .navigationViewStyle(StackNavigationViewStyle())
-            .tabItem { Label("Сеть", systemImage: "bolt.horizontal.circle.fill") }
-            
-            NavigationView {
-                SettingsView().environmentObject(meshManager)
-            }
-            .navigationViewStyle(StackNavigationViewStyle())
-            .tabItem { Label("Штаб", systemImage: "cpu") }
-        }.accentColor(.cyan)
-    }
-}
+    @Binding var showScanner: Bool
 
-struct ChatListManager: View {
-    @EnvironmentObject var meshManager: MeshNetworkManager
     var body: some View {
         ZStack {
             Color(red: 0.01, green: 0.02, blue: 0.06).ignoresSafeArea()
             
-            if meshManager.contacts.isEmpty && meshManager.nearbyNodes.isEmpty {
-                RadarEmptyState(hqID: meshManager.myHQID)
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 12) {
-                        ForEach(meshManager.contacts) { contact in
-                            NavigationLink(destination: ChatView(contactID: contact.hqId).environmentObject(meshManager)) {
-                                ContactCard(contact: contact)
-                            }.buttonStyle(PlainButtonStyle())
-                        }
-                    }.padding(.horizontal, 16).padding(.top, 16)
+            if meshManager.contacts.isEmpty {
+                VStack(spacing: 30) {
+                    ZStack {
+                        Circle().fill(Color.cyan.opacity(0.1)).frame(width: 150, height: 150)
+                        Image(systemName: "antenna.radiowaves.left.and.right").font(.system(size: 60)).foregroundColor(.cyan)
+                    }
+                    Text("Сектор пуст").font(.title2.bold())
+                    Text("Обнаружение узлов активно. Сканируйте QR или ждите появления соседей.").multilineTextAlignment(.center).foregroundColor(.gray).padding(.horizontal, 40)
+                    
+                    Button(action: { showScanner = true }) {
+                        Label("Сканировать Узел", systemImage: "qrcode.viewfinder").font(.headline).foregroundColor(.black).padding().background(Color.cyan).cornerRadius(18)
+                    }
                 }
+            } else {
+                List {
+                    ForEach(meshManager.contacts) { contact in
+                        NavigationLink(destination: ChatView(contactID: contact.hqId).environmentObject(meshManager)) {
+                            ContactCell(contact: contact)
+                        }
+                        .listRowBackground(Color.white.opacity(0.03))
+                    }
+                    .onDelete { indexSet in /* Logic for removal */ }
+                }
+                .listStyle(InsetGroupedListStyle())
             }
         }
         .navigationTitle("HQ Global")
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button(action: { showScanner = true }) {
+                    Image(systemName: "qrcode.viewfinder").font(.title3).foregroundColor(.cyan)
+                }
+            }
+        }
     }
 }
 
-struct ContactCard: View {
+struct ContactCell: View {
     let contact: Contact
     var body: some View {
         HStack(spacing: 16) {
             ZStack {
-                Circle().fill(LinearGradient(colors: [.blue, .cyan], startPoint: .topLeading, endPoint: .bottomTrailing)).frame(width: 60, height: 60)
-                Text(String(contact.name.prefix(1).capitalized)).font(.system(size: 24, weight: .heavy)).foregroundColor(.white)
+                Circle().fill(LinearGradient(colors: [.blue, .cyan], startPoint: .topLeading, endPoint: .bottomTrailing)).frame(width: 55, height: 55)
+                Text(String(contact.name.prefix(1)).uppercased()).font(.title2.bold()).foregroundColor(.white)
+                
+                Circle().stroke(Color.black, lineWidth: 3).background(Circle().fill(Color.green)).frame(width: 14, height: 14).offset(x: 18, y: 18)
             }
             
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 5) {
                 Text(contact.name).font(.headline).foregroundColor(.white)
-                Text("ID: \(contact.hqId)").font(.system(size: 12, design: .monospaced)).foregroundColor(.gray)
+                Text("ID: " + contact.hqId).font(.caption.monospaced()).foregroundColor(.gray)
             }
             Spacer()
-            Image(systemName: "chevron.right").font(.caption).foregroundColor(.gray)
-        }
-        .padding(16)
-        .background(Color.white.opacity(0.05))
-        .cornerRadius(24)
-        .overlay(RoundedRectangle(cornerRadius: 24).stroke(Color.white.opacity(0.08), lineWidth: 1))
-    }
-}
-
-struct RadarEmptyState: View {
-    let hqID: String
-    var body: some View {
-        VStack(spacing: 30) {
-            ZStack {
-                Circle().fill(LinearGradient(colors: [.blue, .cyan], startPoint: .top, endPoint: .bottom)).frame(width: 80, height: 80)
-                Image(systemName: "antenna.radiowaves.left.and.right").font(.system(size: 30, weight: .bold)).foregroundColor(.white)
-            }
-            
-            VStack(spacing: 8) {
-                Text("Сектор чист").font(.system(size: 28, weight: .heavy)).foregroundColor(.white)
-                Text("Разверните сеть для локальной связи.").foregroundColor(.gray)
-            }
-            
-            Button(action: {
-                let text = "Присоединяйся к HQ Global. Мой ID: \(hqID)"
-                let av = UIActivityViewController(activityItems: [text], applicationActivities: nil)
-                if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                   let root = scene.windows.first?.rootViewController { root.present(av, animated: true) }
-            }) {
-                HStack {
-                    Image(systemName: "square.and.arrow.up")
-                    Text("Передать координаты узла")
-                }
-                .font(.system(size: 16, weight: .bold))
-                .foregroundColor(.black)
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(Color.cyan)
-                .cornerRadius(20)
-            }
-            .padding(.horizontal, 40).padding(.top, 20)
-        }
+            Image(systemName: "chevron.right").font(.caption).foregroundColor(.gray.opacity(0.5))
+        }.padding(.vertical, 8)
     }
 }

@@ -1,216 +1,153 @@
 import SwiftUI
-import UIKit
-
-struct Particle: Identifiable {
-    let id = UUID()
-    var position: CGPoint
-    var velocity: CGVector
-    var life: Double
-}
-
-class ParticleSystem: ObservableObject {
-    @Published var particles: [Particle] = []
-    let maxParticles = 30
-    
-    func setup(width: CGFloat, height: CGFloat) {
-        particles = (0..<maxParticles).map { _ in
-            Particle(
-                position: CGPoint(x: CGFloat.random(in: 0...width), y: CGFloat.random(in: 0...height)),
-                velocity: CGVector(dx: CGFloat.random(in: -0.2...0.2), dy: CGFloat.random(in: -0.2...0.2)),
-                life: Double.random(in: 0.5...1.0)
-            )
-        }
-    }
-    
-    func update(width: CGFloat, height: CGFloat) {
-        for i in particles.indices {
-            var p = particles[i]
-            p.position.x += p.velocity.dx
-            p.position.y += p.velocity.dy
-            
-            if p.position.x < 0 || p.position.x > width { p.velocity.dx *= -1 }
-            if p.position.y < 0 || p.position.y > height { p.velocity.dy *= -1 }
-            
-            particles[i] = p
-        }
-    }
-}
 
 struct AuthView: View {
     @EnvironmentObject var meshManager: MeshNetworkManager
     
+    // States
     @State private var email = ""
     @State private var code = ""
     @State private var username = ""
     @State private var nickname = ""
     @State private var acceptedEULA = false
-    @State private var pulseLogo = false
-    
-    @StateObject private var system = ParticleSystem()
-    @State private var animationTimer: Timer?
+    @State private var logoScale: CGFloat = 1.0
     
     var body: some View {
-        GeometryReader { geo in
-            ZStack {
-                Color(red: 0.01, green: 0.02, blue: 0.08).ignoresSafeArea()
-                
-                // Безопасный анимированный фон
-                ZStack {
-                    ForEach(system.particles) { particle in
+        ZStack {
+            // Background Layer
+            Color(red: 0.01, green: 0.02, blue: 0.06).ignoresSafeArea()
+            
+            // Atmospheric Glow
+            RadialGradient(gradient: Gradient(colors: [Color.blue.opacity(0.12), .clear]), center: .topLeading, startRadius: 100, endRadius: 600).ignoresSafeArea()
+            RadialGradient(gradient: Gradient(colors: [Color.cyan.opacity(0.08), .clear]), center: .bottomTrailing, startRadius: 100, endRadius: 500).ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                // MARK: - Branding Header
+                VStack(spacing: 20) {
+                    ZStack {
                         Circle()
-                            .fill(Color.cyan.opacity(particle.life * 0.5))
-                            .frame(width: 4, height: 4)
-                            .position(particle.position)
+                            .fill(Color.cyan.opacity(0.1))
+                            .frame(width: 130, height: 130)
+                            .scaleEffect(logoScale)
+                        
+                        Image(systemName: "shield.righthalf.filled")
+                            .font(.system(size: 70, weight: .thin))
+                            .foregroundColor(.cyan)
+                            .shadow(color: .cyan.opacity(0.6), radius: 15)
                     }
-                }
-                .onAppear {
-                    system.setup(width: geo.size.width, height: geo.size.height)
-                    animationTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in
-                        system.update(width: geo.size.width, height: geo.size.height)
+                    .padding(.top, 60)
+                    .onAppear {
+                        withAnimation(.easeInOut(duration: 2.5).repeatForever(autoreverses: true)) {
+                            logoScale = 1.15
+                        }
                     }
+                    
+                    Text("HQ Global")
+                        .font(.system(size: 44, weight: .black, design: .rounded))
+                        .foregroundColor(.white)
+                        .tracking(1.5)
+                    
+                    Text(authSubtitle)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundColor(.gray)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 40)
+                        .frame(height: 60)
                 }
-                .onDisappear { animationTimer?.invalidate() }
-                
-                VStack(spacing: 0) {
-                    VStack(spacing: 15) {
+
+                Spacer()
+
+                // MARK: - Input Form
+                VStack(spacing: 24) {
+                    Group {
+                        if meshManager.authStep == .enterEmail {
+                            VStack(spacing: 16) {
+                                HQInput(icon: "envelope.fill", placeholder: "Адрес электронной почты", text: $email, type: .emailAddress)
+                                
+                                HStack(spacing: 12) {
+                                    Button(action: { acceptedEULA.toggle() }) {
+                                        Image(systemName: acceptedEULA ? "checkmark.square.fill" : "square")
+                                            .font(.title2).foregroundColor(acceptedEULA ? .cyan : .gray)
+                                    }
+                                    Text("Принимаю Пользовательское соглашение").font(.caption).foregroundColor(.gray)
+                                    Spacer()
+                                }.padding(.horizontal, 10)
+                            }
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                        } else if meshManager.authStep == .enterCode {
+                            HQInput(icon: "lock.shield.fill", placeholder: "Код подтверждения", text: $code, type: .numberPad)
+                                .transition(.move(edge: .trailing).combined(with: .opacity))
+                        } else {
+                            VStack(spacing: 16) {
+                                HQInput(icon: "at", placeholder: "Уникальный ID", text: $username, type: .default)
+                                HQInput(icon: "person.crop.circle", placeholder: "Имя (Nickname)", text: $nickname, type: .default)
+                            }
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                        }
+                    }
+                    .animation(.spring(response: 0.5, dampingFraction: 0.7), value: meshManager.authStep)
+
+                    if !meshManager.authError.isEmpty {
+                        Text(meshManager.authError).foregroundColor(.red).font(.caption.bold()).multilineTextAlignment(.center)
+                    }
+
+                    Button(action: handlePrimaryAction) {
                         ZStack {
-                            Circle()
-                                .fill(RadialGradient(gradient: Gradient(colors: [.cyan.opacity(0.3), .clear]), center: .center, startRadius: 10, endRadius: 70))
-                                .frame(width: 140, height: 140)
-                                .scaleEffect(pulseLogo ? 1.1 : 0.9)
-                                .animation(Animation.easeInOut(duration: 2.0).repeatForever(autoreverses: true), value: pulseLogo)
-                            
-                            Image(systemName: "shield.righthalf.filled")
-                                .font(.system(size: 70, weight: .light))
-                                .foregroundColor(.cyan)
-                                .shadow(color: .cyan.opacity(0.8), radius: 20)
+                            if meshManager.isWaiting { ProgressView().tint(.black) }
+                            else { Text(buttonTitle).font(.system(size: 18, weight: .bold)) }
                         }
-                        .padding(.top, 50)
-                        .onAppear { pulseLogo = true }
-                        
-                        Text("HQ Global")
-                            .font(.system(size: 40, weight: .black, design: .rounded))
-                            .foregroundColor(.white)
-                        
-                        Text(dynamicSubtitle)
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(.gray)
-                            .multilineTextAlignment(.center)
-                            .frame(height: 50)
+                        .frame(maxWidth: .infinity).frame(height: 60)
+                        .background(Color.cyan).cornerRadius(20).foregroundColor(.black)
+                        .shadow(color: .cyan.opacity(0.3), radius: 10, y: 5)
                     }
-                    
-                    Spacer()
-                    
-                    VStack(spacing: 20) {
-                        Group {
-                            if meshManager.authStep == .enterEmail {
-                                VStack(spacing: 16) {
-                                    PremiumInputCell(icon: "envelope.fill", placeholder: "Адрес почты", text: $email, keyboard: .emailAddress)
-                                    HStack(alignment: .top, spacing: 12) {
-                                        Button(action: {
-                                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                                            acceptedEULA.toggle()
-                                        }) {
-                                            Image(systemName: acceptedEULA ? "checkmark.square.fill" : "square")
-                                                .font(.system(size: 24))
-                                                .foregroundColor(acceptedEULA ? .cyan : .gray)
-                                        }
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            Text("Регистрируясь, вы принимаете").foregroundColor(.gray)
-                                            Text("Соглашение и Политику").foregroundColor(.cyan).underline()
-                                        }.font(.caption)
-                                        Spacer()
-                                    }.padding(.horizontal, 8)
-                                }.transition(.opacity)
-                            } 
-                            else if meshManager.authStep == .enterCode {
-                                PremiumInputCell(icon: "lock.shield.fill", placeholder: "Секретный код", text: $code, keyboard: .numberPad)
-                                    .transition(.opacity)
-                            } 
-                            else if meshManager.authStep == .setupProfile {
-                                VStack(spacing: 16) {
-                                    PremiumInputCell(icon: "at", placeholder: "Уникальный ID", text: $username, keyboard: .default)
-                                    PremiumInputCell(icon: "person.crop.circle", placeholder: "Отображаемое Имя", text: $nickname, keyboard: .default)
-                                }.transition(.opacity)
-                            }
-                        }
-                        .animation(.easeInOut, value: meshManager.authStep)
-                        
-                        if !meshManager.authError.isEmpty {
-                            Text(meshManager.authError).foregroundColor(.red).font(.system(size: 13, weight: .bold))
-                        }
-                        
-                        Button(action: executeAuthProtocol) {
-                            ZStack {
-                                if meshManager.isWaitingForServer {
-                                    ProgressView().progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                } else {
-                                    Text(dynamicButtonTitle).font(.system(size: 17, weight: .bold)).foregroundColor(.white)
-                                }
-                            }
-                            .frame(maxWidth: .infinity).frame(height: 60)
-                            .background(LinearGradient(colors: [.blue, Color(red: 0.05, green: 0.3, blue: 0.9)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                            .cornerRadius(20)
-                        }
-                        .disabled(meshManager.isWaitingForServer)
-                        .padding(.top, 10)
-                    }
-                    .padding(30)
-                    .background(Color.black.opacity(0.6))
-                    .cornerRadius(30)
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 50)
+                    .disabled(meshManager.isWaiting || (meshManager.authStep == .enterEmail && !acceptedEULA))
+                    .opacity((meshManager.authStep == .enterEmail && !acceptedEULA) ? 0.6 : 1.0)
                 }
+                .padding(32)
+                .background(Color.white.opacity(0.05))
+                .cornerRadius(35)
+                .overlay(RoundedRectangle(cornerRadius: 35).stroke(Color.white.opacity(0.1), lineWidth: 1))
+                .padding(.horizontal, 20)
+                .padding(.bottom, 50)
             }
         }
     }
-    
-    private var dynamicSubtitle: String {
+
+    private var authSubtitle: String {
         switch meshManager.authStep {
-        case .enterEmail: return "Децентрализованный протокол HQ.\nАктивируйте узел Империи."
-        case .enterCode: return "Защищенный туннель установлен.\nКод доступа отправлен на почту."
-        case .setupProfile: return "Ключи шифрования сгенерированы.\nЗадайте публичные параметры."
+        case .enterEmail: return "Активация децентрализованного узла.\nВведите почту для авторизации."
+        case .enterCode: return "Защищенный туннель открыт.\nКод доступа отправлен на почту."
+        case .setupProfile: return "Почти готово. Создайте свой\nуникальный профиль в Империи."
         }
     }
-    
-    private var dynamicButtonTitle: String {
+
+    private var buttonTitle: String {
         switch meshManager.authStep {
         case .enterEmail: return "ПОЛУЧИТЬ ДОСТУП"
-        case .enterCode: return "ВЕРИФИЦИРОВАТЬ"
-        case .setupProfile: return "АКТИВИРОВАТЬ УЗЕЛ"
+        case .enterCode: return "ПОДТВЕРДИТЬ"
+        case .setupProfile: return "ВОЙТИ В ИМПЕРИЮ"
         }
     }
-    
-    private func executeAuthProtocol() {
-        meshManager.authError = ""
-        let generator = UIImpactFeedbackGenerator(style: .medium)
-        generator.impactOccurred()
-        
+
+    private func handlePrimaryAction() {
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         switch meshManager.authStep {
-        case .enterEmail:
-            if email.isEmpty { meshManager.authError = "Введите почту"; return }
-            if !acceptedEULA { meshManager.authError = "Необходимо принять соглашение"; return }
-            meshManager.requestEmailCode(email: email)
-        case .enterCode:
-            if !code.isEmpty { meshManager.authStep = .setupProfile }
-            else { meshManager.authError = "Введите код" }
-        case .setupProfile:
-            if !username.isEmpty && !nickname.isEmpty {
-                meshManager.registerUser(email: email, code: code, username: username, nickname: nickname)
-            } else { meshManager.authError = "Заполните все поля" }
+        case .enterEmail: meshManager.requestAccessCode(email: email)
+        case .enterCode: meshManager.authStep = .setupProfile
+        case .setupProfile: meshManager.registerEmpireNode(email: email, code: code, username: username, nickname: nickname)
         }
     }
 }
 
-struct PremiumInputCell: View {
-    let icon: String; let placeholder: String; @Binding var text: String; let keyboard: UIKeyboardType
+struct HQInput: View {
+    let icon: String; let placeholder: String; @Binding var text: String; let type: UIKeyboardType
     var body: some View {
-        HStack(spacing: 16) {
-            Image(systemName: icon).font(.system(size: 20)).foregroundColor(.cyan).frame(width: 30)
-            ZStack(alignment: .leading) {
-                if text.isEmpty { Text(placeholder).foregroundColor(.white.opacity(0.3)).font(.body) }
-                TextField("", text: $text).foregroundColor(.white).keyboardType(keyboard).autocapitalization(.none).disableAutocorrection(true).font(.system(size: 17, weight: .medium))
-            }
+        HStack(spacing: 15) {
+            Image(systemName: icon).foregroundColor(.cyan).frame(width: 25)
+            TextField(placeholder, text: $text)
+                .foregroundColor(.white)
+                .keyboardType(type)
+                .autocapitalization(.none)
+                .disableAutocorrection(true)
         }
         .padding(18).background(Color.black.opacity(0.4)).cornerRadius(18)
         .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.white.opacity(0.1), lineWidth: 1))

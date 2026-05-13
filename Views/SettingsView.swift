@@ -1,103 +1,104 @@
 import SwiftUI
 import CoreImage.CIFilterBuiltins
-import UIKit
 
 struct SettingsView: View {
     @EnvironmentObject var meshManager: MeshNetworkManager
-    @State private var showQR = false
-    @State private var showDeleteAlert = false
+    @State private var showMyQR = false
     
     var body: some View {
         ZStack {
             Color(red: 0.01, green: 0.02, blue: 0.06).ignoresSafeArea()
             
             ScrollView {
-                VStack(spacing: 24) {
-                    VStack(spacing: 16) {
+                VStack(spacing: 35) {
+                    // MARK: - Profile Card
+                    VStack(spacing: 15) {
                         ZStack {
-                            Circle().fill(LinearGradient(colors: [.blue, .cyan], startPoint: .topLeading, endPoint: .bottomTrailing)).frame(width: 120, height: 120)
-                            Text(avatarLetter).font(.system(size: 50, weight: .black)).foregroundColor(.white)
+                            Circle().fill(LinearGradient(colors: [.blue, .cyan], startPoint: .topLeading, endPoint: .bottomTrailing)).frame(width: 110, height: 110).shadow(color: .cyan.opacity(0.4), radius: 20)
+                            Text(String(meshManager.myNickname.prefix(1)).uppercased()).font(.system(size: 45, weight: .black)).foregroundColor(.white)
                         }
-                        VStack(spacing: 4) {
-                            Text(displayName).font(.system(size: 24, weight: .bold)).foregroundColor(.white)
-                            Text("@\(displayUsername)").foregroundColor(.cyan).font(.system(size: 15, design: .monospaced))
+                        
+                        VStack(spacing: 5) {
+                            Text(meshManager.myNickname).font(.title2.bold()).foregroundColor(.white)
+                            Text("@" + meshManager.myUsername).font(.headline).foregroundColor(.cyan)
                         }
-                    }.padding(.top, 20)
-                    
+                    }.padding(.top, 30)
+
+                    // MARK: - Network Dashboard
                     VStack(spacing: 0) {
-                        HQDashboardRow(icon: "server.rack", title: "Состояние Штаба", value: meshManager.connectionState == .connected ? "ONLINE" : "ПОИСК", valueColor: meshManager.connectionState == .connected ? .green : .orange)
-                        Divider().background(Color.white.opacity(0.1)).padding(.leading, 64)
-                        HQDashboardRow(icon: "network", title: "Локальный Mesh", value: "\(meshManager.nearbyNodes.count) УЗЛОВ", valueColor: .cyan)
-                        Divider().background(Color.white.opacity(0.1)).padding(.leading, 64)
-                        HQDashboardRow(icon: "arrow.up.arrow.down", title: "Трафик (Байты)", value: "\(meshManager.bytesSent) ↑ \(meshManager.bytesReceived) ↓", valueColor: .gray)
-                        Divider().background(Color.white.opacity(0.1)).padding(.leading, 64)
-                        HQDashboardRow(icon: "shield.fill", title: "Блок-лист", value: "\(meshManager.blockedUsers.count)", valueColor: .red)
+                        DashboardItem(icon: "antenna.radiowaves.left.and.right", title: "Состояние Сети", value: meshManager.connectionState == .connected ? "ONLINE" : "P2P ONLY", color: meshManager.connectionState == .connected ? .green : .orange)
+                        Divider().background(Color.white.opacity(0.1))
+                        DashboardItem(icon: "bolt.circle", title: "Узлов рядом", value: "\(meshManager.activePeerCount)", color: .cyan)
+                        Divider().background(Color.white.opacity(0.1))
+                        DashboardItem(icon: "arrow.up.arrow.down", title: "Трафик (байт)", value: "\(meshManager.bytesSent) ↑ / \(meshManager.bytesReceived) ↓", color: .gray)
                     }
-                    .background(Color.white.opacity(0.05)).cornerRadius(24).padding(.horizontal, 20)
+                    .background(Color.white.opacity(0.05)).cornerRadius(25).padding(.horizontal)
+
+                    // MARK: - Core Tools
+                    VStack(spacing: 15) {
+                        Button(action: { showMyQR = true }) {
+                            HStack {
+                                Image(systemName: "qrcode").font(.title2).foregroundColor(.cyan)
+                                Text("Мой QR Код Сопряжения").font(.headline)
+                                Spacer()
+                                Image(systemName: "chevron.right").font(.caption).foregroundColor(.gray)
+                            }.padding(22).background(Color.white.opacity(0.05)).cornerRadius(20)
+                        }.foregroundColor(.white)
+                        
+                        Button(action: { meshManager.destructSelfNode() }) {
+                            Text("УНИЧТОЖИТЬ УЗЕЛ").font(.headline.bold()).foregroundColor(.red).frame(maxWidth: .infinity).padding().background(Color.red.opacity(0.1)).cornerRadius(20)
+                        }
+                    }.padding(.horizontal)
                     
-                    Button(action: { showQR = true }) {
-                        HStack {
-                            Image(systemName: "qrcode.viewfinder").font(.title3).foregroundColor(.cyan)
-                            Text("Протокол сопряжения (QR)").font(.system(size: 17, weight: .semibold)).foregroundColor(.white)
-                            Spacer()
-                            Image(systemName: "chevron.right").foregroundColor(.gray)
-                        }.padding(20).background(Color.white.opacity(0.05)).cornerRadius(20)
-                    }.padding(.horizontal, 20)
-                    
-                    Button(action: { showDeleteAlert = true }) {
-                        Text("Уничтожить узел").font(.system(size: 17, weight: .bold)).foregroundColor(.red).frame(maxWidth: .infinity).padding().background(Color.red.opacity(0.1)).cornerRadius(20)
-                    }.padding(.horizontal, 20).padding(.top, 20)
+                    Text("HQ GLOBAL PROTOCOL v5.0.1 ALPHA").font(.system(size: 10, design: .monospaced)).foregroundColor(.gray.opacity(0.5))
                 }
             }
         }
         .navigationTitle("Управление Штабом")
-        .sheet(isPresented: $showQR) { HQQRScanner(hqID: meshManager.myHQID) }
-        .alert(isPresented: $showDeleteAlert) {
-            Alert(title: Text("ВНИМАНИЕ"), message: Text("Все данные будут удалены."), primaryButton: .destructive(Text("Уничтожить")) { meshManager.destructEmpireNode() }, secondaryButton: .cancel(Text("Отмена")))
-        }
+        .sheet(isPresented: $showMyQR) { QRDetails(id: meshManager.myHQID) }
     }
-    
-    private var avatarLetter: String { meshManager.myNickname.isEmpty ? "H" : String(meshManager.myNickname.prefix(1).uppercased()) }
-    private var displayName: String { meshManager.myNickname.isEmpty ? "Узел Империи" : meshManager.myNickname }
-    private var displayUsername: String { meshManager.myUsername.isEmpty ? meshManager.myHQID : meshManager.myUsername }
 }
 
-struct HQDashboardRow: View {
-    let icon: String; let title: String; let value: String; let valueColor: Color
+struct DashboardItem: View {
+    let icon: String; let title: String; let value: String; let color: Color
     var body: some View {
-        HStack(spacing: 16) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.05)).frame(width: 44, height: 44)
-                Image(systemName: icon).foregroundColor(valueColor)
-            }
-            Text(title).font(.system(size: 16, weight: .semibold)).foregroundColor(.white)
+        HStack {
+            Image(systemName: icon).foregroundColor(color).frame(width: 30)
+            Text(title).foregroundColor(.white)
             Spacer()
-            Text(value).font(.system(size: 14, weight: .heavy, design: .monospaced)).foregroundColor(valueColor)
-        }.padding(16)
+            Text(value).font(.system(size: 14, weight: .bold, design: .monospaced)).foregroundColor(color)
+        }.padding(20)
     }
 }
 
-struct HQQRScanner: View {
-    let hqID: String
+struct QRDetails: View {
+    let id: String
     var body: some View {
         ZStack {
-            Color(red: 0.02, green: 0.02, blue: 0.05).ignoresSafeArea()
-            VStack(spacing: 40) {
-                Text("Протокол сопряжения").font(.system(size: 28, weight: .bold)).foregroundColor(.white).padding(.top, 50)
+            Color.black.ignoresSafeArea()
+            VStack(spacing: 35) {
+                Text("Ваш ключ в Империи").font(.title3.bold()).foregroundColor(.white)
+                
                 ZStack {
-                    RoundedRectangle(cornerRadius: 40).fill(Color.white).frame(width: 320, height: 320)
-                    Image(uiImage: generateQRCode(from: hqID)).interpolation(.none).resizable().scaledToFit().frame(width: 280, height: 280)
+                    RoundedRectangle(cornerRadius: 30).fill(Color.white).frame(width: 300, height: 300)
+                    Image(uiImage: generateQR(from: id))
+                        .interpolation(.none).resizable().scaledToFit().frame(width: 250, height: 250)
                 }
-                Text(hqID).font(.system(size: 22, weight: .black, design: .monospaced)).foregroundColor(.cyan).padding().background(Color.cyan.opacity(0.15)).cornerRadius(16)
+                
+                Text(id).font(.system(size: 24, weight: .black, design: .monospaced)).foregroundColor(.cyan)
+                
+                Text("Покажите этот код другому участнику\nдля установления прямой связи.").multilineTextAlignment(.center).foregroundColor(.gray).font(.subheadline)
+                
                 Spacer()
-            }
+            }.padding(.top, 50)
         }
     }
-    
-    func generateQRCode(from string: String) -> UIImage {
-        let context = CIContext(); let filter = CIFilter.qrCodeGenerator()
+
+    func generateQR(from string: String) -> UIImage {
+        let context = CIContext()
+        let filter = CIFilter.qrCodeGenerator()
         filter.setValue(Data(string.utf8), forKey: "inputMessage")
-        if let outputImage = filter.outputImage, let cgImage = context.createCGImage(outputImage, from: outputImage.extent) { return UIImage(cgImage: cgImage) }
+        if let output = filter.outputImage, let cg = context.createCGImage(output, from: output.extent) { return UIImage(cgImage: cg) }
         return UIImage()
     }
 }
