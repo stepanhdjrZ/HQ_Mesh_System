@@ -10,31 +10,16 @@ struct AuthView: View {
 
     var body: some View {
         ZStack {
-            // Глубокий премиальный фон
             LinearGradient(colors: [Color(red: 0.05, green: 0.06, blue: 0.1), .black], startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
             
             VStack(spacing: 32) {
-                // Header
                 VStack(spacing: 16) {
-                    Image(systemName: "shield.righthalf.filled")
-                        .font(.system(size: 80))
-                        .foregroundColor(.blue)
-                        .shadow(color: .blue.opacity(0.4), radius: 15)
-                    
-                    Text("HQ Global")
-                        .font(.system(size: 36, weight: .black, design: .rounded))
-                        .foregroundColor(.white)
-                    
-                    Text(subtitleForCurrentStep)
-                        .font(.subheadline)
-                        .foregroundColor(.gray)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 20)
-                }
-                .padding(.top, 50)
+                    Image(systemName: "shield.righthalf.filled").font(.system(size: 80)).foregroundColor(.blue).shadow(color: .blue.opacity(0.4), radius: 15)
+                    Text("HQ Global").font(.system(size: 36, weight: .black, design: .rounded)).foregroundColor(.white)
+                    Text(subtitleForCurrentStep).font(.subheadline).foregroundColor(.gray).multilineTextAlignment(.center).padding(.horizontal, 20)
+                }.padding(.top, 50)
                 
-                // Form Fields
                 VStack(spacing: 16) {
                     switch meshManager.authStep {
                     case .enterEmail:
@@ -45,45 +30,29 @@ struct AuthView: View {
                         AuthTextField(icon: "at", placeholder: "username", text: $username, keyboard: .default)
                         AuthTextField(icon: "person.fill", placeholder: "Имя (Nickname)", text: $nickname, keyboard: .default)
                     }
-                }
-                .padding(.horizontal, 24)
+                }.padding(.horizontal, 24)
                 
-                // Error Label
                 if !meshManager.authError.isEmpty {
-                    Text(meshManager.authError)
-                        .foregroundColor(.red)
-                        .font(.caption)
-                        .padding(.horizontal)
+                    Text(meshManager.authError).foregroundColor(.red).font(.caption).padding(.horizontal)
                 }
                 
-                // Submit Button
                 Button(action: submitAction) {
                     ZStack {
                         if meshManager.isWaitingForServer {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            ProgressView().progressViewStyle(CircularProgressViewStyle(tint: .white))
                         } else {
-                            Text(buttonTitleForCurrentStep)
-                                .font(.headline)
-                                .foregroundColor(.white)
+                            Text(buttonTitleForCurrentStep).font(.headline).foregroundColor(.white)
                         }
                     }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 56)
-                    .background(Color.blue)
-                    .cornerRadius(16)
-                    .shadow(color: .blue.opacity(0.3), radius: 10, y: 5)
+                    .frame(maxWidth: .infinity).frame(height: 56).background(Color.blue).cornerRadius(16).shadow(color: .blue.opacity(0.3), radius: 10, y: 5)
                 }
-                .padding(.horizontal, 24)
-                .padding(.top, 10)
-                .disabled(meshManager.isWaitingForServer)
+                .padding(.horizontal, 24).padding(.top, 10).disabled(meshManager.isWaitingForServer)
                 
                 Spacer()
             }
         }
     }
     
-    // MARK: - Computed Properties
     private var subtitleForCurrentStep: String {
         switch meshManager.authStep {
         case .enterEmail: return "Децентрализованная сеть. Введите почту для получения доступа."
@@ -100,7 +69,6 @@ struct AuthView: View {
         }
     }
     
-    // MARK: - Actions
     private func submitAction() {
         meshManager.authError = ""
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
@@ -116,39 +84,23 @@ struct AuthView: View {
             let cleanUser = username.trimmingCharacters(in: .whitespacesAndNewlines)
             let cleanNick = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
             if !cleanUser.isEmpty && !cleanNick.isEmpty {
-                meshManager.myUsername = cleanUser
-                meshManager.myNickname = cleanNick
                 meshManager.registerUser(email: email, code: code, username: cleanUser, nickname: cleanNick)
             }
         }
     }
 }
 
-// MARK: - Reusable UI Component
 struct AuthTextField: View {
-    let icon: String
-    let placeholder: String
-    @Binding var text: String
-    let keyboard: UIKeyboardType
-    
+    let icon: String; let placeholder: String; @Binding var text: String; let keyboard: UIKeyboardType
     var body: some View {
         HStack(spacing: 16) {
-            Image(systemName: icon)
-                .foregroundColor(.blue)
-                .frame(width: 24)
-            
+            Image(systemName: icon).foregroundColor(.blue).frame(width: 24)
             TextField(placeholder, text: $text)
                 .foregroundColor(.white)
                 .keyboardType(keyboard)
-                .autocapitalization(.none)
+                .textInputAutocapitalization(.never)
                 .disableAutocorrection(true)
         }
-        .padding()
-        .background(Color.white.opacity(0.08))
-        .cornerRadius(16)
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.white.opacity(0.1), lineWidth: 1)
-        )
+        .padding().background(Color.white.opacity(0.08)).cornerRadius(16).overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.1), lineWidth: 1))
     }
 }
