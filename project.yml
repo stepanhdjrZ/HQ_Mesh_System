@@ -1,7 +1,8 @@
 name: HQGlobalMesh
 options:
   bundleIdPrefix: com.hq.global
-  xcodeVersion: "15.0"
+  xcodeVersion: "15.4"
+  objectVersion: 56 # 🎯 Это магическое число для формата Xcode 15.x
 targets:
   HQGlobalMesh:
     type: application
@@ -23,7 +24,6 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_VERSION: 5.9
         CODE_SIGNING_ALLOWED: NO
-        CODE_SIGNING_REQUIRED: NO
     dependencies:
       - package: Firebase
     
