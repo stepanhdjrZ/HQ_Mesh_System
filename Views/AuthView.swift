@@ -1,7 +1,6 @@
 import SwiftUI
 import UIKit
 
-// MARK: - Надежная система частиц (iOS 15 Safe)
 struct Particle: Identifiable {
     let id = UUID()
     var position: CGPoint
@@ -48,14 +47,14 @@ struct AuthView: View {
     @State private var pulseLogo = false
     
     @StateObject private var system = ParticleSystem()
-    let timer = Timer.publish(every: 0.05, on: .main, in: .common).autoconnect()
+    @State private var animationTimer: Timer?
     
     var body: some View {
         GeometryReader { geo in
             ZStack {
                 Color(red: 0.01, green: 0.02, blue: 0.08).ignoresSafeArea()
                 
-                // Оптимизированный фон (без Canvas для стабильности сборки)
+                // Безопасный анимированный фон
                 ZStack {
                     ForEach(system.particles) { particle in
                         Circle()
@@ -64,17 +63,21 @@ struct AuthView: View {
                             .position(particle.position)
                     }
                 }
-                .onAppear { system.setup(width: geo.size.width, height: geo.size.height) }
-                .onReceive(timer) { _ in system.update(width: geo.size.width, height: geo.size.height) }
+                .onAppear {
+                    system.setup(width: geo.size.width, height: geo.size.height)
+                    animationTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in
+                        system.update(width: geo.size.width, height: geo.size.height)
+                    }
+                }
+                .onDisappear { animationTimer?.invalidate() }
                 
                 VStack(spacing: 0) {
-                    // Header Area
                     VStack(spacing: 15) {
                         ZStack {
                             Circle()
                                 .fill(RadialGradient(gradient: Gradient(colors: [.cyan.opacity(0.3), .clear]), center: .center, startRadius: 10, endRadius: 70))
                                 .frame(width: 140, height: 140)
-                                .scaleEffect(pulseLogo ? 1.05 : 0.95)
+                                .scaleEffect(pulseLogo ? 1.1 : 0.9)
                                 .animation(Animation.easeInOut(duration: 2.0).repeatForever(autoreverses: true), value: pulseLogo)
                             
                             Image(systemName: "shield.righthalf.filled")
@@ -98,7 +101,6 @@ struct AuthView: View {
                     
                     Spacer()
                     
-                    // Form Area
                     VStack(spacing: 20) {
                         Group {
                             if meshManager.authStep == .enterEmail {
@@ -181,7 +183,8 @@ struct AuthView: View {
     
     private func executeAuthProtocol() {
         meshManager.authError = ""
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        let generator = UIImpactFeedbackGenerator(style: .medium)
+        generator.impactOccurred()
         
         switch meshManager.authStep {
         case .enterEmail:

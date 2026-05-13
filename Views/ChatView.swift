@@ -20,7 +20,8 @@ struct ChatView: View {
                             ForEach(meshManager.messages.filter { $0.partnerId == contactID }) { msg in
                                 HQMessageBubble(message: msg).id(msg.id)
                             }
-                        }.padding(.horizontal, 16).padding(.bottom, 20).padding(.top, 20)
+                        }
+                        .padding(.horizontal, 16).padding(.bottom, 20).padding(.top, 20)
                     }
                     .onChange(of: meshManager.messages.count) { _ in
                         if let lastMsg = meshManager.messages.filter({ $0.partnerId == contactID }).last {
@@ -31,7 +32,11 @@ struct ChatView: View {
                 
                 HStack(alignment: .bottom, spacing: 12) {
                     Button(action: {}) { Image(systemName: "paperclip").font(.system(size: 24)).foregroundColor(.gray).frame(height: 44) }
-                    TextField("Сообщение...", text: $inputText).padding(.horizontal, 18).padding(.vertical, 12).background(Color.white.opacity(0.1)).cornerRadius(22).foregroundColor(.white)
+                    
+                    TextField("Сообщение...", text: $inputText)
+                        .padding(.horizontal, 18).padding(.vertical, 12)
+                        .background(Color.white.opacity(0.1)).cornerRadius(22).foregroundColor(.white)
+                    
                     Button(action: transmitPayload) {
                         ZStack {
                             Circle().fill(inputText.isEmpty ? Color.white.opacity(0.2) : Color.cyan).frame(width: 44, height: 44)
@@ -39,7 +44,8 @@ struct ChatView: View {
                         }
                     }.disabled(inputText.isEmpty)
                 }
-                .padding(.horizontal, 16).padding(.vertical, 12).background(Color.black.opacity(0.8))
+                .padding(.horizontal, 16).padding(.vertical, 12)
+                .background(Color.black.opacity(0.8))
             }
         }
         .navigationBarTitleDisplayMode(.inline)
@@ -57,7 +63,10 @@ struct ChatView: View {
         .actionSheet(isPresented: $showActionSheet) {
             ActionSheet(title: Text("Управление узлом"), buttons: [
                 .destructive(Text("Пожаловаться на спам")) { showReportAlert = true },
-                .destructive(Text("Заблокировать")) { meshManager.blockNode(contactID); presentationMode.wrappedValue.dismiss() },
+                .destructive(Text("Заблокировать")) {
+                    meshManager.blockNode(contactID)
+                    presentationMode.wrappedValue.dismiss()
+                },
                 .cancel()
             ])
         }
@@ -70,7 +79,8 @@ struct ChatView: View {
         guard !inputText.isEmpty else { return }
         meshManager.sendMessage(to: contactID, text: inputText)
         inputText = ""
-        UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
+        let generator = UIImpactFeedbackGenerator(style: .rigid)
+        generator.impactOccurred()
     }
 }
 
@@ -79,13 +89,16 @@ struct HQMessageBubble: View {
     var body: some View {
         HStack(alignment: .bottom) {
             if message.isMe { Spacer(minLength: 60) }
+            
             VStack(alignment: message.isMe ? .trailing : .leading, spacing: 4) {
                 Text(message.text).font(.system(size: 16))
                 Text(message.timeString).font(.system(size: 11, weight: .bold)).foregroundColor(message.isMe ? .black.opacity(0.5) : .gray)
             }
             .padding(.horizontal, 16).padding(.vertical, 12)
             .background(message.isMe ? LinearGradient(colors: [.cyan, .blue], startPoint: .topLeading, endPoint: .bottomTrailing) : LinearGradient(colors: [Color.white.opacity(0.1), Color.white.opacity(0.1)], startPoint: .top, endPoint: .bottom))
-            .foregroundColor(message.isMe ? .black : .white).cornerRadius(20)
+            .foregroundColor(message.isMe ? .black : .white)
+            .cornerRadius(20)
+            
             if !message.isMe { Spacer(minLength: 60) }
         }
     }

@@ -71,6 +71,7 @@ struct ContactCard: View {
                 Circle().fill(LinearGradient(colors: [.blue, .cyan], startPoint: .topLeading, endPoint: .bottomTrailing)).frame(width: 60, height: 60)
                 Text(String(contact.name.prefix(1).capitalized)).font(.system(size: 24, weight: .heavy)).foregroundColor(.white)
             }
+            
             VStack(alignment: .leading, spacing: 6) {
                 Text(contact.name).font(.headline).foregroundColor(.white)
                 Text("ID: \(contact.hqId)").font(.system(size: 12, design: .monospaced)).foregroundColor(.gray)
@@ -78,7 +79,9 @@ struct ContactCard: View {
             Spacer()
             Image(systemName: "chevron.right").font(.caption).foregroundColor(.gray)
         }
-        .padding(16).background(Color.white.opacity(0.05)).cornerRadius(24)
+        .padding(16)
+        .background(Color.white.opacity(0.05))
+        .cornerRadius(24)
         .overlay(RoundedRectangle(cornerRadius: 24).stroke(Color.white.opacity(0.08), lineWidth: 1))
     }
 }
@@ -91,19 +94,30 @@ struct RadarEmptyState: View {
                 Circle().fill(LinearGradient(colors: [.blue, .cyan], startPoint: .top, endPoint: .bottom)).frame(width: 80, height: 80)
                 Image(systemName: "antenna.radiowaves.left.and.right").font(.system(size: 30, weight: .bold)).foregroundColor(.white)
             }
+            
             VStack(spacing: 8) {
                 Text("Сектор чист").font(.system(size: 28, weight: .heavy)).foregroundColor(.white)
                 Text("Разверните сеть для локальной связи.").foregroundColor(.gray)
             }
+            
             Button(action: {
                 let text = "Присоединяйся к HQ Global. Мой ID: \(hqID)"
                 let av = UIActivityViewController(activityItems: [text], applicationActivities: nil)
                 if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
                    let root = scene.windows.first?.rootViewController { root.present(av, animated: true) }
             }) {
-                HStack { Image(systemName: "square.and.arrow.up"); Text("Пригласить узел") }
-                .font(.system(size: 16, weight: .bold)).foregroundColor(.black).frame(maxWidth: .infinity).padding().background(Color.cyan).cornerRadius(20)
-            }.padding(.horizontal, 40).padding(.top, 20)
+                HStack {
+                    Image(systemName: "square.and.arrow.up")
+                    Text("Передать координаты узла")
+                }
+                .font(.system(size: 16, weight: .bold))
+                .foregroundColor(.black)
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color.cyan)
+                .cornerRadius(20)
+            }
+            .padding(.horizontal, 40).padding(.top, 20)
         }
     }
 }

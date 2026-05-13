@@ -29,34 +29,16 @@ struct SettingsView: View {
                         Divider().background(Color.white.opacity(0.1)).padding(.leading, 64)
                         HQDashboardRow(icon: "network", title: "Локальный Mesh", value: "\(meshManager.nearbyNodes.count) УЗЛОВ", valueColor: .cyan)
                         Divider().background(Color.white.opacity(0.1)).padding(.leading, 64)
-                        HQDashboardRow(icon: "arrow.up.arrow.down", title: "Трафик", value: "\(meshManager.bytesSent) ↑ \(meshManager.bytesReceived) ↓", valueColor: .gray)
-                    }.background(Color.white.opacity(0.05)).cornerRadius(24).padding(.horizontal, 20)
-                    
-                    // Хакерский Терминал
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("ТЕРМИНАЛ ЯДРА").font(.system(size: 12, weight: .bold)).foregroundColor(.gray).padding(.horizontal, 30)
-                        ScrollViewReader { proxy in
-                            ScrollView {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    ForEach(meshManager.systemLogs) { log in
-                                        HStack(alignment: .top) {
-                                            Text(">").foregroundColor(.gray)
-                                            Text(log.message).foregroundColor(colorForLog(log.type))
-                                            Spacer()
-                                        }.font(.system(size: 12, design: .monospaced)).id(log.id)
-                                    }
-                                }.padding(16)
-                            }
-                            .frame(height: 150).background(Color.black).cornerRadius(20)
-                            .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.white.opacity(0.1), lineWidth: 1))
-                            .padding(.horizontal, 20)
-                        }
+                        HQDashboardRow(icon: "arrow.up.arrow.down", title: "Трафик (Байты)", value: "\(meshManager.bytesSent) ↑ \(meshManager.bytesReceived) ↓", valueColor: .gray)
+                        Divider().background(Color.white.opacity(0.1)).padding(.leading, 64)
+                        HQDashboardRow(icon: "shield.fill", title: "Блок-лист", value: "\(meshManager.blockedUsers.count)", valueColor: .red)
                     }
+                    .background(Color.white.opacity(0.05)).cornerRadius(24).padding(.horizontal, 20)
                     
                     Button(action: { showQR = true }) {
                         HStack {
                             Image(systemName: "qrcode.viewfinder").font(.title3).foregroundColor(.cyan)
-                            Text("Показать QR-код").font(.system(size: 17, weight: .semibold)).foregroundColor(.white)
+                            Text("Протокол сопряжения (QR)").font(.system(size: 17, weight: .semibold)).foregroundColor(.white)
                             Spacer()
                             Image(systemName: "chevron.right").foregroundColor(.gray)
                         }.padding(20).background(Color.white.opacity(0.05)).cornerRadius(20)
@@ -64,20 +46,15 @@ struct SettingsView: View {
                     
                     Button(action: { showDeleteAlert = true }) {
                         Text("Уничтожить узел").font(.system(size: 17, weight: .bold)).foregroundColor(.red).frame(maxWidth: .infinity).padding().background(Color.red.opacity(0.1)).cornerRadius(20)
-                    }.padding(.horizontal, 20).padding(.top, 10)
+                    }.padding(.horizontal, 20).padding(.top, 20)
                 }
-                .padding(.bottom, 40)
             }
         }
-        .navigationTitle("Управление Штабом").navigationBarTitleDisplayMode(.inline)
+        .navigationTitle("Управление Штабом")
         .sheet(isPresented: $showQR) { HQQRScanner(hqID: meshManager.myHQID) }
         .alert(isPresented: $showDeleteAlert) {
             Alert(title: Text("ВНИМАНИЕ"), message: Text("Все данные будут удалены."), primaryButton: .destructive(Text("Уничтожить")) { meshManager.destructEmpireNode() }, secondaryButton: .cancel(Text("Отмена")))
         }
-    }
-    
-    private func colorForLog(_ type: SystemLog.LogType) -> Color {
-        switch type { case .info: return .gray; case .success: return .green; case .error: return .red; case .warning: return .orange }
     }
     
     private var avatarLetter: String { meshManager.myNickname.isEmpty ? "H" : String(meshManager.myNickname.prefix(1).uppercased()) }
@@ -116,8 +93,10 @@ struct HQQRScanner: View {
             }
         }
     }
+    
     func generateQRCode(from string: String) -> UIImage {
-        let context = CIContext(); let filter = CIFilter.qrCodeGenerator(); filter.setValue(Data(string.utf8), forKey: "inputMessage")
+        let context = CIContext(); let filter = CIFilter.qrCodeGenerator()
+        filter.setValue(Data(string.utf8), forKey: "inputMessage")
         if let outputImage = filter.outputImage, let cgImage = context.createCGImage(outputImage, from: outputImage.extent) { return UIImage(cgImage: cgImage) }
         return UIImage()
     }
