@@ -10,16 +10,16 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Set Xcode Version 🎯
+      run: sudo xcode-select -s /Applications/Xcode_15.4.app
+
     - name: Install XcodeGen
       run: brew install xcodegen
 
     - name: Generate Project
       run: xcodegen generate
 
-    - name: Fetch Dependencies
-      run: xcodebuild -resolvePackageDependencies -project HQGlobalMesh.xcodeproj -scheme HQGlobalMesh
-
-    - name: Compile Application
+    - name: Build and Polish
       run: |
         xcodebuild build \
           -project HQGlobalMesh.xcodeproj \
