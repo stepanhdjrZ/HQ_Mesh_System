@@ -10,13 +10,16 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Set Xcode to version 16 (Format 77) 🎯
+      run: sudo xcode-select -s /Applications/Xcode_16.0.app
+
     - name: Install XcodeGen
       run: brew install xcodegen
 
     - name: Generate Project
       run: xcodegen generate
 
-    - name: Build and Polish
+    - name: Build Application
       run: |
         xcodebuild build \
           -project HQGlobalMesh.xcodeproj \
