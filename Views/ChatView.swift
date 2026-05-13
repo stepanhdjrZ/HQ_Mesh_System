@@ -5,10 +5,11 @@ struct ChatView: View {
     let contactID: String
     @EnvironmentObject var meshManager: MeshNetworkManager
     @State private var inputText = ""
+    @State private var showReportAlert = false
+    @Environment(\.presentationMode) var presentationMode
     
     var body: some View {
         ZStack {
-            // Фон чата
             Color(red: 0.03, green: 0.03, blue: 0.06).ignoresSafeArea()
             
             VStack(spacing: 0) {
@@ -19,9 +20,7 @@ struct ChatView: View {
                                 MessageBubbleCell(message: msg).id(msg.id)
                             }
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.top, 20)
-                        .padding(.bottom, 10)
+                        .padding(.horizontal, 16).padding(.top, 20).padding(.bottom, 10)
                     }
                     .onChange(of: meshManager.messages.count) { _ in
                         if let lastMsg = meshManager.messages.filter({ $0.partnerId == contactID }).last {
@@ -30,46 +29,40 @@ struct ChatView: View {
                     }
                 }
                 
-                // Плавающая стеклянная панель ввода
                 HStack(spacing: 12) {
-                    Button(action: {}) {
-                        Image(systemName: "paperclip").font(.title2).foregroundColor(.gray)
-                    }
-                    
+                    Button(action: {}) { Image(systemName: "paperclip").font(.title2).foregroundColor(.gray) }
                     TextField("Сообщение...", text: $inputText)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        .background(Color.white.opacity(0.05))
-                        .cornerRadius(20)
-                        .foregroundColor(.white)
-                        .disableAutocorrection(true)
+                        .padding(.horizontal, 16).padding(.vertical, 10)
+                        .background(Color.white.opacity(0.05)).cornerRadius(20).foregroundColor(.white).disableAutocorrection(true)
                     
                     Button(action: handleSend) {
                         ZStack {
-                            Circle()
-                                .fill(inputText.isEmpty ? Color.white.opacity(0.1) : Color.cyan)
-                                .frame(width: 40, height: 40)
-                            
-                            Image(systemName: inputText.isEmpty ? "mic.fill" : "arrow.up")
-                                .font(.system(size: 18, weight: .bold))
-                                .foregroundColor(inputText.isEmpty ? .gray : .black)
+                            Circle().fill(inputText.isEmpty ? Color.white.opacity(0.1) : Color.cyan).frame(width: 40, height: 40)
+                            Image(systemName: inputText.isEmpty ? "mic.fill" : "arrow.up").font(.system(size: 18, weight: .bold)).foregroundColor(inputText.isEmpty ? .gray : .black)
                         }
-                    }
-                    .disabled(inputText.trimmingCharacters(in: .whitespaces).isEmpty && false)
+                    }.disabled(inputText.trimmingCharacters(in: .whitespaces).isEmpty && false)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background(
-                    Material.ultraThinMaterial
-                        .edgesIgnoringSafeArea(.bottom)
-                )
-                .overlay(
-                    Rectangle().frame(height: 0.5).foregroundColor(Color.white.opacity(0.1)), alignment: .top
-                )
+                .padding(.horizontal, 16).padding(.vertical, 12)
+                .background(Material.ultraThinMaterial.edgesIgnoringSafeArea(.bottom))
             }
         }
         .navigationTitle(contactID)
         .navigationBarTitleDisplayMode(.inline)
+        // APPLE REQUIREMENT: Report/Block menu
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Menu {
+                    Button(role: .destructive, action: { showReportAlert = true }) { Label("Пожаловаться (Спам)", systemImage: "exclamationmark.bubble") }
+                    Button(role: .destructive, action: { 
+                        meshManager.blockUser(contactID)
+                        presentationMode.wrappedValue.dismiss() // Выходим из чата
+                    }) { Label("Заблокировать", systemImage: "hand.raised.fill") }
+                } label: { Image(systemName: "ellipsis.circle").foregroundColor(.cyan) }
+            }
+        }
+        .alert("Жалоба отправлена", isPresented: $showReportAlert) {
+            Button("ОК", role: .cancel) { }
+        } message: { Text("Модераторы проверят этот узел в течение 24 часов.") }
     }
     
     private func handleSend() {
@@ -81,32 +74,20 @@ struct ChatView: View {
     }
 }
 
-// Премиум бабблы сообщений
 struct MessageBubbleCell: View {
     let message: ChatMessage
     var body: some View {
         HStack {
             if message.isMe { Spacer(minLength: 50) }
-            
             VStack(alignment: .trailing, spacing: 4) {
-                Text(message.text)
-                    .font(.body)
-                
-                Text(message.timeString)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(message.isMe ? .black.opacity(0.5) : .gray)
+                Text(message.text).font(.body)
+                Text(message.timeString).font(.system(size: 10, weight: .medium)).foregroundColor(message.isMe ? .black.opacity(0.5) : .gray)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(
-                message.isMe 
-                ? AnyView(LinearGradient(colors: [.cyan, .blue], startPoint: .topLeading, endPoint: .bottomTrailing))
-                : AnyView(Color.white.opacity(0.1).background(Material.ultraThinMaterial))
-            )
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            .background(message.isMe ? AnyView(LinearGradient(colors: [.cyan, .blue], startPoint: .topLeading, endPoint: .bottomTrailing)) : AnyView(Color.white.opacity(0.1).background(Material.ultraThinMaterial)))
             .foregroundColor(message.isMe ? .black : .white)
             .clipShape(ChatBubbleShape(isMe: message.isMe))
             .shadow(color: message.isMe ? .cyan.opacity(0.3) : .black.opacity(0.2), radius: 5, y: 2)
-            
             if !message.isMe { Spacer(minLength: 50) }
         }
     }
@@ -115,11 +96,7 @@ struct MessageBubbleCell: View {
 struct ChatBubbleShape: Shape {
     let isMe: Bool
     func path(in rect: CGRect) -> Path {
-        let path = UIBezierPath(
-            roundedRect: rect,
-            byRoundingCorners: isMe ? [.topLeft, .topRight, .bottomLeft] : [.topLeft, .topRight, .bottomRight],
-            cornerRadii: CGSize(width: 18, height: 18)
-        )
+        let path = UIBezierPath(roundedRect: rect, byRoundingCorners: isMe ? [.topLeft, .topRight, .bottomLeft] : [.topLeft, .topRight, .bottomRight], cornerRadii: CGSize(width: 18, height: 18))
         return Path(path.cgPath)
     }
 }
