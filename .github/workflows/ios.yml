@@ -1,29 +1,30 @@
-name: HQ Empire Build
+name: HQ Empire Build v26
 
 on:
   push:
     branches: [ main ]
-  pull_request:
-    branches: [ main ]
 
 jobs:
   build:
-    runs-on: macos-latest # Гитхаб дает нам свой Мак бесплатно
+    runs-on: macos-14 # Самый свежий мак в облаке Гитхаба
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Install XcodeGen
       run: brew install xcodegen
 
-    - name: Generate Xcode Project
+    - name: Generate Project for iOS 18-26
       run: xcodegen generate
 
-    - name: Build for iOS 26 Hybrid
+    - name: Select Xcode Version
+      run: sudo xcode-select -s /Applications/Xcode_15.4.app
+
+    - name: Build and Polish
       run: |
         xcodebuild build \
           -project HQGlobalMesh.xcodeproj \
           -scheme HQGlobalMesh \
-          -sdk iphoneos \
-          -configuration Debug \
+          -destination 'generic/platform=iOS' \
+          -configuration Release \
           CODE_SIGNING_ALLOWED=NO
