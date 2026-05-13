@@ -1,4 +1,4 @@
-name: HQ Empire Build v26
+name: HQ Empire Build
 
 on:
   push:
@@ -10,16 +10,16 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Show File Structure
-      run: find . -maxdepth 2 -not -path '*/.*'
-
     - name: Install XcodeGen
       run: brew install xcodegen
 
     - name: Generate Project
       run: xcodegen generate
 
-    - name: Build
+    - name: Fetch Dependencies
+      run: xcodebuild -resolvePackageDependencies -project HQGlobalMesh.xcodeproj -scheme HQGlobalMesh
+
+    - name: Compile Application
       run: |
         xcodebuild build \
           -project HQGlobalMesh.xcodeproj \
