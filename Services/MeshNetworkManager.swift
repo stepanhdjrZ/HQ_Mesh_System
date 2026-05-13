@@ -2,17 +2,21 @@ import Foundation
 import MultipeerConnectivity
 import SwiftUI
 import UIKit
-import CryptoKit
+import Combine
 
+// MARK: - Core Data Architecture
 struct ChatMessage: Identifiable, Codable, Hashable {
     var id = UUID()
     let text: String
     let isMe: Bool
     let partnerId: String
     let timestamp: Date
+    var isDelivered: Bool = false
+    
     var timeString: String {
-        let f = DateFormatter(); f.dateFormat = "HH:mm"
-        return f.string(from: timestamp)
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter.string(from: timestamp)
     }
 }
 
@@ -21,31 +25,42 @@ struct Contact: Identifiable, Codable, Hashable {
     let hqId: String
     let name: String
     var lastMessageDate: Date
+    var status: NodeStatus = .offline
+    
+    enum NodeStatus: String, Codable { case online, offline, mesh }
 }
 
+// MARK: - HQ Global Engine
 class MeshNetworkManager: NSObject, ObservableObject {
+    // Shared States
     @Published var connectionState: ConnectionState = .disconnected
     @Published var messages: [ChatMessage] = []
     @Published var contacts: [Contact] = []
     @Published var nearbyNodes: [String] = []
     @Published var blockedUsers: [String] = []
     
+    // User Identity & Security
     @Published var myHQID: String = ""
     @Published var myUsername: String = ""
     @Published var myNickname: String = ""
-    @Published var hasAccess = false
-    @Published var authStep: AuthStep = .enterEmail
-    @Published var isWaiting = false
-    @Published var authError = ""
+    @Published var hasAccess: Bool = false
     
+    // Auth State Machine
+    @Published var authStep: AuthStep = .enterEmail
+    @Published var isWaiting: Bool = false
+    @Published var authError: String = ""
+    
+    // Telemetry & Metrics
     @Published var bytesSent: Int64 = 0
     @Published var bytesReceived: Int64 = 0
+    @Published var activePeerCount: Int = 0
 
     enum ConnectionState { case disconnected, connecting, connected, meshOnly }
     enum AuthStep { case enterEmail, enterCode, setupProfile }
     
+    // Private Infrastructure
     private var webSocket: URLSessionWebSocketTask?
-    private let serviceType = "hq-mesh-v4"
+    private let serviceType = "hq-global-mesh-v5"
     private var myPeerID: MCPeerID!
     private var session: MCSession!
     private var advertiser: MCNearbyServiceAdvertiser!
@@ -53,130 +68,203 @@ class MeshNetworkManager: NSObject, ObservableObject {
     private var heartbeatTimer: Timer?
     private let serverURL = "wss://elevation-strength-authentic.ngrok-free.dev/ws"
 
+    // MARK: - Initialization
     override init() {
         super.init()
-        loadData()
-        setupMesh()
-        if hasAccess { connectToHQ() }
+        print("[HQ] Запуск системного ядра...")
+        self.loadPersistentStorage()
+        self.initializeMeshProtocol()
+        if hasAccess { self.establishHQLink() }
     }
 
-    func requestEmailCode(email: String) {
-        isWaiting = true
-        sendJSON(["type": "request_code", "email": email])
+    // MARK: - Authentication API
+    func requestAccessCode(email: String) {
+        guard email.contains("@") && email.count > 5 else {
+            self.authError = "Критическая ошибка: Неверный формат почты"
+            return
+        }
+        self.isWaiting = true
+        self.authError = ""
+        self.transmitJSON(["type": "request_code", "email": email.lowercased()])
     }
     
-    func registerUser(email: String, code: String, username: String, nickname: String) {
-        isWaiting = true
-        sendJSON(["type": "verify_and_register", "email": email, "code": code, "username": username, "nickname": nickname, "hq_id": myHQID])
+    func registerEmpireNode(email: String, code: String, username: String, nickname: String) {
+        self.isWaiting = true
+        self.transmitJSON([
+            "type": "verify_and_register",
+            "email": email,
+            "code": code,
+            "username": username,
+            "nickname": nickname,
+            "hq_id": myHQID
+        ])
     }
 
-    func connectToHQ() {
-        DispatchQueue.main.async { self.connectionState = .connecting }
+    // MARK: - HQ Global WebSocket Link
+    func establishHQLink() {
         guard let url = URL(string: serverURL) else { return }
-        webSocket = URLSession.shared.webSocketTask(with: url)
+        DispatchQueue.main.async { self.connectionState = .connecting }
+        
+        let request = URLRequest(url: url, timeoutInterval: 15)
+        webSocket = URLSession.shared.webSocketTask(with: request)
         webSocket?.resume()
-        if hasAccess { sendJSON(["type": "register", "my_id": myHQID]) }
-        listenWS()
+        
+        if hasAccess { transmitJSON(["type": "register", "my_id": myHQID]) }
+        
+        self.listenForDataPackets()
+        self.startKeepAliveSignal()
     }
 
-    private func listenWS() {
+    private func listenForDataPackets() {
         webSocket?.receive { [weak self] result in
             guard let self = self else { return }
             switch result {
-            case .success(let msg):
-                if case .string(let text) = msg { self.handleServerMsg(text) }
-                self.listenWS()
+            case .success(let message):
+                self.incrementMetric(received: true, size: 512)
+                if case .string(let text) = message { self.parseIncomingJSON(text) }
+                self.listenForDataPackets()
                 DispatchQueue.main.async { self.connectionState = .connected }
-            case .failure:
+            case .failure(let error):
+                print("[HQ ERROR] Разрыв связи со Штабом: \(error)")
                 DispatchQueue.main.async { self.connectionState = .meshOnly }
-                DispatchQueue.global().asyncAfter(deadline: .now() + 5) { self.connectToHQ() }
+                self.scheduleReconnect()
             }
         }
     }
 
-    private func handleServerMsg(_ text: String) {
-        guard let data = text.data(using: .utf8), let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+    private func parseIncomingJSON(_ text: String) {
+        guard let data = text.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = json["type"] as? String else { return }
+        
         DispatchQueue.main.async {
             self.isWaiting = false
-            let type = json["type"] as? String
-            if type == "code_response" { self.authStep = .enterCode }
-            else if type == "auth_success" { self.finalizeAuth() }
-            else if type == "msg" { self.receiveMsg(json) }
+            switch type {
+            case "code_response":
+                if json["success"] as? Bool == true { self.authStep = .enterCode }
+                else { self.authError = "Ошибка SMTP-шлюза: Письмо не доставлено." }
+            case "auth_success":
+                self.persistAccess()
+            case "auth_error":
+                self.authError = json["text"] as? String ?? "Ошибка авторизации"
+            case "msg":
+                self.processInboundMessage(json)
+            default: break
+            }
         }
     }
 
-    func sendMessage(to id: String, text: String) {
-        let payload: [String: Any] = ["type": "private_msg", "to_id": id, "text": text]
-        sendJSON(payload)
+    // MARK: - Message Routing & Mesh Delivery
+    func dispatchMessage(to targetID: String, text: String) {
+        let payload: [String: Any] = ["type": "private_msg", "to_id": targetID, "text": text]
+        let estSize = Int64(text.count * 2 + 128)
+        
+        // 1. Попытка через Штаб (WebSocket)
+        if connectionState == .connected {
+            transmitJSON(payload)
+            self.incrementMetric(received: false, size: estSize)
+        }
+        
+        // 2. Параллельная доставка через локальный Mesh (P2P)
         if let data = try? JSONSerialization.data(withJSONObject: payload) {
-            try? session.send(data, toPeers: session.connectedPeers, with: .reliable)
+            do {
+                try session.send(data, toPeers: session.connectedPeers, with: .reliable)
+                self.incrementMetric(received: false, size: estSize)
+            } catch {
+                print("[HQ MESH] Локальная доставка не удалась")
+            }
         }
+        
+        // 3. Обновление UI
         DispatchQueue.main.async {
-            self.messages.append(ChatMessage(text: text, isMe: true, partnerId: id, timestamp: Date()))
-            self.updateContacts(id: id)
+            let newMsg = ChatMessage(text: text, isMe: true, partnerId: targetID, timestamp: Date())
+            self.messages.append(newMsg)
+            self.updateContactHierarchy(id: targetID)
         }
     }
 
-    private func receiveMsg(_ json: [String: Any]) {
-        guard let from = json["from_id"] as? String, let txt = json["text"] as? String else { return }
+    private func processInboundMessage(_ json: [String: Any]) {
+        guard let from = json["from_id"] as? String,
+              let text = json["text"] as? String else { return }
+        
         if blockedUsers.contains(from) { return }
-        messages.append(ChatMessage(text: txt, isMe: false, partnerId: from, timestamp: Date()))
-        updateContacts(id: from)
+        
+        let newMsg = ChatMessage(text: text, isMe: false, partnerId: from, timestamp: Date())
+        self.messages.append(newMsg)
+        self.updateContactHierarchy(id: from)
+        
         UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
     }
 
-    func handleQR(_ code: String) {
+    func handleExternalQR(_ code: String) {
         if code.hasPrefix("HQ-") {
-            updateContacts(id: code)
+            self.updateContactHierarchy(id: code)
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         }
     }
 
-    private func updateContacts(id: String) {
-        if !contacts.contains(where: { $0.hqId == id }) {
-            contacts.insert(Contact(hqId: id, name: "Узел " + id.prefix(6), lastMessageDate: Date()), at: 0)
+    // MARK: - Advanced Safety & Persistence
+    func blockEmpireUser(_ id: String) {
+        if !blockedUsers.contains(id) {
+            blockedUsers.append(id)
+            UserDefaults.standard.set(blockedUsers, forKey: "blockedUsers")
+            contacts.removeAll { $0.hqId == id }
+            messages.removeAll { $0.partnerId == id }
         }
     }
 
-    func block(_ id: String) {
-        blockedUsers.append(id)
-        UserDefaults.standard.set(blockedUsers, forKey: "blockedUsers")
-        contacts.removeAll { $0.hqId == id }
-    }
-
-    private func sendJSON(_ dict: [String: Any]) {
-        if let data = try? JSONSerialization.data(withJSONObject: dict), let str = String(data: data, encoding: .utf8) {
-            webSocket?.send(.string(str)) { _ in }
-        }
-    }
-
-    private func finalizeAuth() {
-        hasAccess = true
+    private func persistAccess() {
+        self.hasAccess = true
         UserDefaults.standard.set(true, forKey: "isRegistered")
         UserDefaults.standard.set(myUsername, forKey: "myUsername")
         UserDefaults.standard.set(myNickname, forKey: "myNickname")
     }
 
-    func logout() {
-        ["isRegistered", "myHQID", "myUsername", "myNickname"].forEach { UserDefaults.standard.removeObject(forKey: $0) }
-        hasAccess = false
-        loadData()
+    func destructSelfNode() {
+        ["isRegistered", "myHQID", "myUsername", "myNickname", "blockedUsers"].forEach { UserDefaults.standard.removeObject(forKey: $0) }
+        self.hasAccess = false
+        self.authStep = .enterEmail
+        self.messages.removeAll()
+        self.contacts.removeAll()
+        self.loadPersistentStorage()
     }
 
-    private func loadData() {
-        hasAccess = UserDefaults.standard.bool(forKey: "isRegistered")
-        myUsername = UserDefaults.standard.string(forKey: "myUsername") ?? ""
-        myNickname = UserDefaults.standard.string(forKey: "myNickname") ?? ""
-        blockedUsers = UserDefaults.standard.stringArray(forKey: "blockedUsers") ?? []
-        if let id = UserDefaults.standard.string(forKey: "myHQID") { myHQID = id }
-        else {
-            let newID = "HQ-" + UUID().uuidString.prefix(6).uppercased()
-            UserDefaults.standard.set(newID, forKey: "myHQID")
-            myHQID = newID
+    // MARK: - Low Level Protocol Management
+    private func transmitJSON(_ dict: [String: Any]) {
+        if let data = try? JSONSerialization.data(withJSONObject: dict),
+           let str = String(data: data, encoding: .utf8) {
+            webSocket?.send(.string(str)) { _ in }
         }
     }
 
-    private func setupMesh() {
+    private func scheduleReconnect() {
+        DispatchQueue.global().asyncAfter(deadline: .now() + 5) { [weak self] in
+            if self?.hasAccess == true { self?.establishHQLink() }
+        }
+    }
+
+    private func incrementMetric(received: Bool, size: Int64) {
+        DispatchQueue.main.async {
+            if received { self.bytesReceived += size }
+            else { self.bytesSent += size }
+        }
+    }
+
+    private func loadPersistentStorage() {
+        self.hasAccess = UserDefaults.standard.bool(forKey: "isRegistered")
+        self.myUsername = UserDefaults.standard.string(forKey: "myUsername") ?? ""
+        self.myNickname = UserDefaults.standard.string(forKey: "myNickname") ?? ""
+        self.blockedUsers = UserDefaults.standard.stringArray(forKey: "blockedUsers") ?? []
+        
+        if let id = UserDefaults.standard.string(forKey: "myHQID") { self.myHQID = id }
+        else {
+            let newID = "HQ-\(UUID().uuidString.prefix(6).uppercased())"
+            UserDefaults.standard.set(newID, forKey: "myHQID")
+            self.myHQID = newID
+        }
+    }
+
+    private func initializeMeshProtocol() {
         myPeerID = MCPeerID(displayName: myHQID)
         session = MCSession(peer: myPeerID, securityIdentity: nil, encryptionPreference: .required)
         session.delegate = self
@@ -188,20 +276,37 @@ class MeshNetworkManager: NSObject, ObservableObject {
         browser.startBrowsingForPeers()
     }
 
-    private func startHeartbeat() {
-        heartbeatTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { _ in
-            self.webSocket?.sendPing { _ in }
+    private func updateContactHierarchy(id: String) {
+        if let index = contacts.firstIndex(where: { $0.hqId == id }) {
+            contacts[index].lastMessageDate = Date()
+            let moved = contacts.remove(at: index)
+            contacts.insert(moved, at: 0)
+        } else {
+            contacts.insert(Contact(hqId: id, name: "Node " + String(id.suffix(4)), lastMessageDate: Date()), at: 0)
+        }
+    }
+
+    private func startKeepAliveSignal() {
+        heartbeatTimer?.invalidate()
+        heartbeatTimer = Timer.scheduledTimer(withTimeInterval: 25.0, repeats: true) { [weak self] _ in
+            self?.webSocket?.sendPing { _ in }
         }
     }
 }
 
+// MARK: - Multipeer Delegate Implementation
 extension MeshNetworkManager: MCSessionDelegate, MCNearbyServiceAdvertiserDelegate, MCNearbyServiceBrowserDelegate {
     func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didReceiveInvitationFromPeer peerID: MCPeerID, withContext context: Data?, invitationHandler: @escaping (Bool, MCSession?) -> Void) { invitationHandler(true, session) }
-    func browser(_ browser: MCNearbyServiceBrowser, foundPeer peerID: MCPeerID, withDiscoveryInfo info: [String : String]?) { browser.invitePeer(peerID, to: session, withContext: nil, timeout: 10) }
-    func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) { DispatchQueue.main.async { self.nearbyNodes = session.connectedPeers.map { $0.displayName } } }
+    func browser(_ browser: MCNearbyServiceBrowser, foundPeer peerID: MCPeerID, withDiscoveryInfo info: [String : String]?) { browser.invitePeer(peerID, to: session, withContext: nil, timeout: 15) }
+    func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) { 
+        DispatchQueue.main.async { 
+            self.nearbyNodes = session.connectedPeers.map { $0.displayName } 
+            self.activePeerCount = session.connectedPeers.count
+        } 
+    }
     func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-        DispatchQueue.main.async { self.receiveMsg(json) }
+        DispatchQueue.main.async { self.processInboundMessage(json) }
     }
     func session(_ session: MCSession, didReceive stream: InputStream, withName streamName: String, fromPeer peerID: MCPeerID) {}
     func session(_ session: MCSession, didStartReceivingResourceWithName resourceName: String, fromPeer peerID: MCPeerID, with progress: Progress) {}
