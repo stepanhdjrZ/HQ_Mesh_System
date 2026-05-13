@@ -8,7 +8,7 @@ let package = Package(
         .library(name: "HQGlobalMesh", targets: ["HQGlobalMesh"])
     ],
     dependencies: [
-        .package(url: "https://github.com/firebase/firebase-ios-sdk.git", .upToDateWithMiniVersion(from: "10.25.0"))
+        .package(url: "https://github.com/firebase/firebase-ios-sdk.git", .upToDateWithMiniVersion(from: "10.0.0"))
     ],
     targets: [
         .target(
@@ -19,11 +19,7 @@ let package = Package(
                 .product(name: "FirebaseAuth", package: "firebase-ios-sdk")
             ],
             path: ".",
-            exclude: [
-                "Package.swift",
-                "GoogleService-Info.plist",
-                ".github"
-            ]
+            exclude: ["Package.swift", "GoogleService-Info.plist", ".github"]
         )
     ]
 )
