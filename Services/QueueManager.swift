@@ -1,53 +1,55 @@
 import Foundation
 
-struct QueuedMessage: Codable, Identifiable {
+// Профессиональная структура пакета для очереди
+struct QueuedMessage: Identifiable {
     let id: UUID
     let targetID: String
-    let payload: [String: Any]
+    let payload: Data // Используем Data вместо словаря для стабильности
     var retryCount: Int
     
-    enum CodingKeys: String, CodingKey { case id, targetID, payload, retryCount }
-    
-    // Кастомный энкодер, так как [String: Any] не кодируется по дефолту
-    init(targetID: String, payload: [String: Any]) {
+    init(targetID: String, dictionary: [String: Any]) {
         self.id = UUID()
         self.targetID = targetID
-        self.payload = payload
         self.retryCount = 0
+        // Конвертируем словарь в сырые данные
+        self.payload = (try? JSONSerialization.data(withJSONObject: dictionary)) ?? Data()
+    }
+    
+    var dictionary: [String: Any]? {
+        return (try? JSONSerialization.jsonObject(with: payload)) as? [String: Any]
     }
 }
 
 final class QueueManager: ObservableObject {
     @Published var pendingQueue: [QueuedMessage] = []
-    private let persistence = PersistenceManager()
     
     func addToQueue(target: String, data: [String: Any]) {
-        let msg = QueuedMessage(targetID: target, payload: data)
-        pendingQueue.append(msg)
-        LoggerService.log("Пакет для \(target) поставлен в очередь ожидания.")
-        saveQueue()
+        let msg = QueuedMessage(targetID: target, dictionary: data)
+        DispatchQueue.main.async {
+            self.pendingQueue.append(msg)
+            LoggerService.log("Пакет для \(target) поставлен в очередь. Всего в очереди: \(self.pendingQueue.count)")
+        }
     }
     
-    func processQueue(sendAction: (QueuedMessage) -> Bool) {
+    func processQueue(sendAction: ([String: Any]) -> Bool) {
         guard !pendingQueue.isEmpty else { return }
         
-        LoggerService.log("Попытка протолкнуть очередь: \(pendingQueue.count) пакетов.")
-        
         var deliveredIndices = [Int]()
+        
         for (index, msg) in pendingQueue.enumerated() {
-            if sendAction(msg) {
+            if let dict = msg.dictionary, sendAction(dict) {
                 deliveredIndices.append(index)
             }
         }
         
-        // Удаляем доставленные
-        for index in deliveredIndices.reversed() {
-            pendingQueue.remove(at: index)
+        // Очистка очереди
+        DispatchQueue.main.async {
+            for index in deliveredIndices.reversed() {
+                self.pendingQueue.remove(at: index)
+            }
+            if !deliveredIndices.isEmpty {
+                LoggerService.log("Очередь обработана. Доставлено пакетов: \(deliveredIndices.count)")
+            }
         }
-        saveQueue()
-    }
-    
-    private func saveQueue() {
-        // Здесь логика сохранения в PersistenceManager, чтобы не терять при перезагрузке
     }
 }
