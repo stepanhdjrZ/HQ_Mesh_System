@@ -4,6 +4,12 @@ import UIKit
 struct ContentView: View {
     @StateObject private var meshManager = MeshNetworkManager()
     
+    // Принудительно делаем всё приложение темным и премиальным
+    init() {
+        UITabBar.appearance().backgroundColor = UIColor(red: 0.02, green: 0.02, blue: 0.05, alpha: 0.9)
+        UITabBar.appearance().unselectedItemTintColor = UIColor.systemGray
+    }
+    
     var body: some View {
         Group {
             if !meshManager.hasAccess {
@@ -12,10 +18,10 @@ struct ContentView: View {
                 MainTabView().environmentObject(meshManager)
             }
         }
+        .preferredColorScheme(.dark) // Фиксируем темную тему Империи
     }
 }
 
-// Разделили UI для чистоты архитектуры
 struct MainTabView: View {
     @EnvironmentObject var meshManager: MeshNetworkManager
     
@@ -24,14 +30,14 @@ struct MainTabView: View {
             NavigationStack {
                 ChatListView().environmentObject(meshManager)
             }
-            .tabItem { Label("Чаты", systemImage: "message.fill") }
+            .tabItem { Label("Связь", systemImage: "bolt.horizontal.circle.fill") }
             
             NavigationStack {
                 SettingsView().environmentObject(meshManager)
             }
-            .tabItem { Label("Профиль", systemImage: "person.crop.circle.fill") }
+            .tabItem { Label("Штаб", systemImage: "cpu") }
         }
-        .tint(.blue)
+        .tint(.cyan)
     }
 }
 
@@ -40,76 +46,114 @@ struct ChatListView: View {
     
     var body: some View {
         ZStack {
+            // Фон списков
+            LinearGradient(colors: [Color(red: 0.02, green: 0.05, blue: 0.1), .black], startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea()
+            
             if meshManager.contacts.isEmpty && meshManager.nearbyNodes.isEmpty {
-                EmptyNetworkState(meshManager: meshManager)
+                EmptyNetworkState(hqID: meshManager.myHQID)
             } else {
-                List(meshManager.contacts) { contact in
-                    NavigationLink(destination: ChatView(contactID: contact.hqId).environmentObject(meshManager)) {
-                        ContactRow(contact: contact)
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        ForEach(meshManager.contacts) { contact in
+                            NavigationLink(destination: ChatView(contactID: contact.hqId).environmentObject(meshManager)) {
+                                ContactRowGlass(contact: contact)
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 10)
                 }
-                .listStyle(.plain)
             }
         }
         .navigationTitle("HQ Global")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
-struct ContactRow: View {
+// Премиальная карточка контакта
+struct ContactRowGlass: View {
     let contact: Contact
+    
     var body: some View {
         HStack(spacing: 16) {
-            Circle()
-                .fill(LinearGradient(colors: [.blue, .cyan], startPoint: .topLeading, endPoint: .bottomTrailing))
-                .frame(width: 52, height: 52)
-                .overlay(Text(String(contact.name.prefix(1).capitalized)).font(.title2.bold()).foregroundColor(.white))
-            
-            VStack(alignment: .leading, spacing: 4) {
-                Text(contact.name).font(.headline)
-                Text("Node ID: \(contact.hqId)").font(.caption).foregroundColor(.secondary)
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(colors: [.blue, .cyan], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 56, height: 56)
+                    .shadow(color: .cyan.opacity(0.4), radius: 8)
+                
+                Text(String(contact.name.prefix(1).capitalized))
+                    .font(.title2.weight(.bold))
+                    .foregroundColor(.white)
             }
+            
+            VStack(alignment: .leading, spacing: 6) {
+                Text(contact.name)
+                    .font(.headline)
+                    .foregroundColor(.white)
+                
+                Text("ID: \(contact.hqId)")
+                    .font(.caption)
+                    .foregroundColor(.cyan.opacity(0.8))
+                    .fontDesign(.monospaced)
+            }
+            Spacer()
+            
+            Image(systemName: "chevron.right")
+                .foregroundColor(.gray.opacity(0.5))
         }
-        .padding(.vertical, 8)
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 24)
+                .fill(Color.white.opacity(0.05))
+                .background(Material.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 24))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 24)
+                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+        )
     }
 }
 
 struct EmptyNetworkState: View {
-    @ObservedObject var meshManager: MeshNetworkManager
-    
+    let hqID: String
     var body: some View {
         VStack(spacing: 24) {
-            Image(systemName: "antenna.radiowaves.left.and.right.slash")
-                .font(.system(size: 72))
-                .foregroundColor(.orange)
+            ZStack {
+                Circle().fill(Color.blue.opacity(0.1)).frame(width: 120, height: 120)
+                Image(systemName: "antenna.radiowaves.left.and.right.slash")
+                    .font(.system(size: 50))
+                    .foregroundColor(.cyan)
+                    .shadow(color: .cyan.opacity(0.5), radius: 10)
+            }
             
-            Text("Сеть Империи пуста")
-                .font(.title2.bold())
+            Text("Сектор пуст")
+                .font(.title.bold())
+                .foregroundColor(.white)
             
-            Text("Пригласите друзей или найдите узел рядом, чтобы активировать Mesh-канал.")
+            Text("Рядом нет активных узлов.\nРазверните сеть для локальной связи.")
                 .multilineTextAlignment(.center)
-                .foregroundColor(.secondary)
+                .foregroundColor(.gray)
                 .padding(.horizontal, 32)
             
-            Button(action: shareApp) {
-                Label("Пригласить в сеть", systemImage: "square.and.arrow.up")
-                    .font(.headline)
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color.blue)
-                    .cornerRadius(14)
+            ShareLink(item: "Присоединяйся к HQ Global. Мой Mesh ID: \(hqID)") {
+                HStack {
+                    Image(systemName: "square.and.arrow.up")
+                    Text("Координаты для инвайта")
+                }
+                .font(.headline)
+                .foregroundColor(.black)
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color.cyan)
+                .cornerRadius(18)
+                .shadow(color: .cyan.opacity(0.4), radius: 10, y: 5)
             }
             .padding(.horizontal, 40)
-            .padding(.top, 16)
-        }
-    }
-    
-    private func shareApp() {
-        let text = "Присоединяйся к HQ Global. Мой Mesh ID: \(meshManager.myHQID)."
-        let av = UIActivityViewController(activityItems: [text], applicationActivities: nil)
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let rootVC = windowScene.windows.first?.rootViewController {
-            rootVC.present(av, animated: true)
+            .padding(.top, 20)
         }
     }
 }
