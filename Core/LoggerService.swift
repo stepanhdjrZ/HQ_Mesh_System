@@ -1,22 +1,20 @@
 import Foundation
 
-/// Глобальный сервис логирования с поддержкой уровней важности
-final class LoggerService {
-    enum LogLevel: String {
-        case info = "ℹ️ INFO"
-        case warning = "⚠️ WARNING"
-        case error = "🚨 ERROR"
-        case security = "🛡 SECURITY"
+/// Системный регистратор событий HQ
+public final class LoggerService {
+    public enum EventType: String {
+        case info = "🔵 INFO"
+        case mesh = "🌐 MESH"
+        case cloud = "☁️ CLOUD"
+        case error = "🔴 ERROR"
+        case safety = "🛡 SAFETY"
     }
     
-    static func log(_ message: String, level: LogLevel = .info, file: String = #file, function: String = #function) {
+    /// Запись события в системный лог
+    public static func log(_ message: String, type: EventType = .info) {
         #if DEBUG
-        let fileName = (file as NSString).lastPathComponent
-        let timestamp = Date().hqFormat() // Используем наш Extension
-        let logString = "[\(timestamp)] [\(level.rawValue)] [\(fileName) -> \(function)]: \(message)"
-        
-        // В будущем здесь будет запись в файл для отправки разработчику (как в ТГ)
-        print(logString)
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        print("[\(timestamp)] [\(type.rawValue)] \(message)")
         #endif
     }
 }
