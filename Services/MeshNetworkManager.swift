@@ -1,7 +1,7 @@
 import Foundation
 import MultipeerConnectivity
 import SwiftUI
-import UIKit // Необходим для UI-отклика (вибрации)
+import UIKit // Необходим для вибрации UIImpactFeedbackGenerator
 
 // MARK: - Models
 struct ChatMessage: Identifiable, Codable, Hashable {
@@ -25,21 +25,18 @@ struct Contact: Identifiable, Codable, Hashable {
     let lastMessageDate: Date
 }
 
-// MARK: - Main Manager
+// MARK: - Manager
 class MeshNetworkManager: NSObject, ObservableObject {
-    // Shared State
     @Published var connectionState: ConnectionState = .disconnected
     @Published var messages: [ChatMessage] = []
     @Published var contacts: [Contact] = []
     @Published var nearbyNodes: [String] = []
     
-    // User Profile
     @Published var myHQID: String = ""
     @Published var myUsername: String = ""
     @Published var myNickname: String = ""
     @Published var hasAccess = false
     
-    // Auth State
     @Published var authStep: AuthStep = .enterEmail
     @Published var isWaitingForServer = false
     @Published var authError = ""
@@ -47,7 +44,6 @@ class MeshNetworkManager: NSObject, ObservableObject {
     enum ConnectionState { case disconnected, connecting, connected, meshOnly }
     enum AuthStep { case enterEmail, enterCode, setupProfile }
     
-    // Private Network properties
     private var webSocket: URLSessionWebSocketTask?
     private let serviceType = "hq-mesh-net"
     private var myPeerID: MCPeerID!
@@ -72,15 +68,13 @@ class MeshNetworkManager: NSObject, ObservableObject {
         isWaitingForServer = true
         sendWSMessage([
             "type": "verify_and_register",
-            "email": email,
-            "code": code,
-            "username": username,
-            "nickname": nickname,
+            "email": email, "code": code,
+            "username": username, "nickname": nickname,
             "hq_id": myHQID
         ])
     }
 
-    // MARK: - WebSocket Logic
+    // MARK: - Network Logic
     func connectToCentralHQ() {
         DispatchQueue.main.async { self.connectionState = .connecting }
         guard let url = URL(string: "wss://elevation-strength-authentic.ngrok-free.dev/ws") else { return }
@@ -117,34 +111,27 @@ class MeshNetworkManager: NSObject, ObservableObject {
         DispatchQueue.main.async {
             self.isWaitingForServer = false
             
-            switch type {
-            case "code_response":
+            if type == "code_response" {
                 if json["success"] as? Bool == true { self.authStep = .enterCode }
                 else { self.authError = "Не удалось отправить письмо." }
-            case "auth_success":
+            } else if type == "auth_success" {
                 self.finalizeRegistration()
-            case "auth_error":
+            } else if type == "auth_error" {
                 self.authError = json["text"] as? String ?? "Ошибка авторизации"
-            case "msg":
+            } else if type == "msg" {
                 self.handleIncomingMessage(json)
-            default: break
             }
         }
     }
 
-    // MARK: - Messaging
     func sendMessage(to targetID: String, text: String) {
         let payload: [String: Any] = ["type": "private_msg", "to_id": targetID, "text": text]
-        
-        // 1. Through Server
         sendWSMessage(payload)
         
-        // 2. Through Mesh
         if let data = try? JSONSerialization.data(withJSONObject: payload) {
             try? session.send(data, toPeers: session.connectedPeers, with: .reliable)
         }
         
-        // 3. Update UI
         DispatchQueue.main.async {
             self.messages.append(ChatMessage(text: text, isMe: true, partnerId: targetID, timestamp: Date()))
         }
@@ -166,7 +153,6 @@ class MeshNetworkManager: NSObject, ObservableObject {
         webSocket?.send(.string(string)) { _ in }
     }
 
-    // MARK: - Data Management
     private func finalizeRegistration() {
         self.hasAccess = true
         UserDefaults.standard.set(true, forKey: "isRegistered")
@@ -175,9 +161,7 @@ class MeshNetworkManager: NSObject, ObservableObject {
     }
 
     func deleteAccountRequest() {
-        let keys = ["isRegistered", "myHQID", "myUsername", "myNickname"]
-        keys.forEach { UserDefaults.standard.removeObject(forKey: $0) }
-        
+        ["isRegistered", "myHQID", "myUsername", "myNickname"].forEach { UserDefaults.standard.removeObject(forKey: $0) }
         self.hasAccess = false
         self.authStep = .enterEmail
         self.loadLocalData()
@@ -201,47 +185,31 @@ class MeshNetworkManager: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - Mesh Core (Bluetooth/WiFi)
+    // MARK: - Mesh Core
     private func setupMeshProtocol() {
         myPeerID = MCPeerID(displayName: myHQID)
         session = MCSession(peer: myPeerID, securityIdentity: nil, encryptionPreference: .required)
         session.delegate = self
-        
         advertiser = MCNearbyServiceAdvertiser(peer: myPeerID, discoveryInfo: nil, serviceType: serviceType)
         advertiser.delegate = self
         advertiser.startAdvertisingPeer()
-        
         browser = MCNearbyServiceBrowser(peer: myPeerID, serviceType: serviceType)
         browser.delegate = self
         browser.startBrowsingForPeers()
     }
 }
 
-// MARK: - MCSessionDelegate
 extension MeshNetworkManager: MCSessionDelegate, MCNearbyServiceAdvertiserDelegate, MCNearbyServiceBrowserDelegate {
-    func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didReceiveInvitationFromPeer peerID: MCPeerID, withContext context: Data?, invitationHandler: @escaping (Bool, MCSession?) -> Void) {
-        invitationHandler(true, session)
-    }
-    
-    func browser(_ browser: MCNearbyServiceBrowser, foundPeer peerID: MCPeerID, withDiscoveryInfo info: [String : String]?) {
-        browser.invitePeer(peerID, to: session, withContext: nil, timeout: 10)
-    }
-    
-    func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) {
-        DispatchQueue.main.async { self.nearbyNodes = session.connectedPeers.map { $0.displayName } }
-    }
-    
+    func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didReceiveInvitationFromPeer peerID: MCPeerID, withContext context: Data?, invitationHandler: @escaping (Bool, MCSession?) -> Void) { invitationHandler(true, session) }
+    func browser(_ browser: MCNearbyServiceBrowser, foundPeer peerID: MCPeerID, withDiscoveryInfo info: [String : String]?) { browser.invitePeer(peerID, to: session, withContext: nil, timeout: 10) }
+    func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) { DispatchQueue.main.async { self.nearbyNodes = session.connectedPeers.map { $0.displayName } } }
     func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let text = json["text"] as? String else { return }
-        
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let text = json["text"] as? String else { return }
         DispatchQueue.main.async {
             self.messages.append(ChatMessage(text: text, isMe: false, partnerId: peerID.displayName, timestamp: Date()))
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
         }
     }
-    
-    // Required Stubs
     func session(_ session: MCSession, didReceive stream: InputStream, withName streamName: String, fromPeer peerID: MCPeerID) {}
     func session(_ session: MCSession, didStartReceivingResourceWithName resourceName: String, fromPeer peerID: MCPeerID, with progress: Progress) {}
     func session(_ session: MCSession, didFinishReceivingResourceWithName resourceName: String, fromPeer peerID: MCPeerID, at localURL: URL?, withError error: Error?) {}
