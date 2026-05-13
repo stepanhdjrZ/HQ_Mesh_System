@@ -4,23 +4,21 @@ import SwiftUI
 import Combine
 
 final class MeshNetworkManager: NSObject, ObservableObject {
-    // MARK: - Архитектурные слои
     private let persistence = PersistenceManager()
-    private let queue = QueueManager()
+    @ObservedObject var queue = QueueManager() // Привязываем очередь
     
     @Published var connectionState: ConnectionState = .disconnected
     @Published var messages: [ChatMessage] = []
     @Published var contacts: [Contact] = []
-    
     @Published var myHQID: String = ""
     @Published var myNickname: String = ""
     @Published var hasAccess: Bool = false
     @Published var authStep: MeshAuthStep = .enterEmail
     @Published var isProcessing: Bool = false
-    
     @Published var statsSent: Int64 = 0
     @Published var statsReceived: Int64 = 0
     
+    enum ConnectionState { case disconnected, connecting, connected, meshOnly }
     enum MeshAuthStep { case enterEmail, enterCode, setupProfile }
     
     private var webSocket: URLSessionWebSocketTask?
@@ -31,7 +29,6 @@ final class MeshNetworkManager: NSObject, ObservableObject {
     
     override init() {
         super.init()
-        LoggerService.log("Запуск протокола v8.0 Enterprise...", level: .security)
         self.setupIdentity()
         self.initMesh()
         if hasAccess { self.connectToHQ() }
@@ -39,32 +36,58 @@ final class MeshNetworkManager: NSObject, ObservableObject {
     
     private func setupIdentity() {
         self.hasAccess = persistence.fetchBool(forKey: .accessGranted)
-        if let id = persistence.fetchString(forKey: .nodeID) {
-            self.myHQID = id
-        } else {
-            let newID = "HQ-" + UUID().uuidString.prefix(8).uppercased()
-            persistence.save(newID, forKey: .nodeID)
-            self.myHQID = newID
-        }
-        self.myNickname = persistence.fetchString(forKey: .nickname) ?? "Shadow Node"
+        self.myHQID = persistence.fetchString(forKey: .nodeID) ?? ("HQ-" + UUID().uuidString.prefix(8).uppercased())
+        persistence.save(self.myHQID, forKey: .nodeID)
+        self.myNickname = persistence.fetchString(forKey: .nickname) ?? "Node"
     }
 
-    // MARK: - Глобальная связь (Штаб)
     func connectToHQ() {
         guard let url = URL(string: AppConstants.serverURL) else { return }
-        self.connectionState = .connecting
+        DispatchQueue.main.async { self.connectionState = .connecting }
         
         let request = URLRequest(url: url)
         webSocket = URLSession.shared.webSocketTask(with: request)
         webSocket?.resume()
         
         self.listen()
-        self.ping()
         
-        // Когда Штаб онлайн — пытаемся выплюнуть очередь
-        self.queue.processQueue { msg in
-            self.transmit(msg.payload)
+        // Пытаемся протолкнуть очередь, если есть интернет
+        self.queue.processQueue { payload in
+            self.transmit(payload)
             return true
+        }
+    }
+
+    func broadcastData(to target: String, content: String) {
+        let packet: [String: Any] = [
+            "type": "secure_msg",
+            "from": myHQID,
+            "to": target,
+            "body": SecurityEngine.encrypt(content),
+            "ts": Date().timeIntervalSince1970
+        ]
+        
+        // 1. Пробуем Mesh (P2P)
+        let meshSuccess = sendToMesh(packet)
+        
+        // 2. Если Mesh не сработал и есть интернет — шлем в Штаб
+        if connectionState == .connected {
+            transmit(packet)
+        } else if !meshSuccess {
+            // 3. Если связи нет совсем — в очередь!
+            queue.addToQueue(target: target, data: packet)
+        }
+        
+        // UI Update
+        let msg = ChatMessage(text: content, isMe: true, partnerId: target, timestamp: Date())
+        DispatchQueue.main.async { self.messages.append(msg) }
+    }
+
+    private func transmit(_ dict: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: dict),
+              let str = String(data: data, encoding: .utf8) else { return }
+        webSocket?.send(.string(str)) { _ in 
+            DispatchQueue.main.async { self.statsSent += Int64(str.count) }
         }
     }
 
@@ -72,51 +95,14 @@ final class MeshNetworkManager: NSObject, ObservableObject {
         webSocket?.receive { [weak self] result in
             guard let self = self else { return }
             switch result {
-            case .success(let message):
-                self.record(received: true, size: 1024)
-                if case .string(let text) = message { self.handleJSON(text) }
+            case .success(let msg):
+                if case .string(let text) = msg { self.handleJSON(text) }
                 self.listen()
                 DispatchQueue.main.async { self.connectionState = .connected }
-            case .failure(let error):
-                LoggerService.log("Разрыв связи: \(error.localizedDescription)", level: .error)
+            case .failure:
                 DispatchQueue.main.async { self.connectionState = .meshOnly }
                 DispatchQueue.global().asyncAfter(deadline: .now() + 5) { self.connectToHQ() }
             }
-        }
-    }
-
-    // MARK: - Маршрутизация (Уровень ТГ)
-    func broadcastData(to target: String, content: String) {
-        let encrypted = SecurityEngine.encrypt(content)
-        let packet: [String: Any] = [
-            "type": "secure_msg",
-            "from": myHQID,
-            "to": target,
-            "body": encrypted,
-            "ts": Date().timeIntervalSince1970
-        ]
-        
-        // 1. Прямой Mesh (Bluetooth) — самый быстрый
-        let meshSent = self.sendToMesh(packet)
-        
-        // 2. Через Штаб (WebSocket)
-        if connectionState == .connected {
-            self.transmit(packet)
-        } else if !meshSent {
-            // 3. Если всё упало — в очередь!
-            self.queue.addToQueue(target: target, data: packet)
-        }
-        
-        // Локальное отображение
-        let msg = ChatMessage(text: content, isMe: true, partnerId: target, timestamp: Date())
-        self.messages.append(msg)
-    }
-
-    private func transmit(_ dict: [String: Any]) {
-        guard let data = try? JSONSerialization.data(withJSONObject: dict),
-              let str = String(data: data, encoding: .utf8) else { return }
-        webSocket?.send(.string(str)) { _ in 
-            self.record(received: false, size: Int64(str.count))
         }
     }
 
@@ -126,34 +112,15 @@ final class MeshNetworkManager: NSObject, ObservableObject {
               let type = json["type"] as? String else { return }
         
         DispatchQueue.main.async {
-            switch type {
-            case "secure_msg": self.processInbound(json)
-            case "auth_code_ok": self.authStep = .enterCode
-            default: break
-            }
+            if type == "secure_msg" { self.processInbound(json) }
         }
     }
 
     private func processInbound(_ json: [String: Any]) {
         guard let from = json["from"] as? String, let body = json["body"] as? String else { return }
-        let decrypted = SecurityEngine.decrypt(body)
-        let newMsg = ChatMessage(text: decrypted, isMe: false, partnerId: from, timestamp: Date())
-        self.messages.append(newMsg)
+        let msg = ChatMessage(text: SecurityEngine.decrypt(body), isMe: false, partnerId: from, timestamp: Date())
+        self.messages.append(msg)
         UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-    }
-
-    // MARK: - Вспомогательные функции
-    private func record(received: Bool, size: Int64) {
-        DispatchQueue.main.async {
-            if received { self.statsReceived += size }
-            else { self.statsSent += size }
-        }
-    }
-
-    func logout() {
-        persistence.wipeAllData()
-        self.hasAccess = false
-        self.authStep = .enterEmail
     }
 
     private func initMesh() {
@@ -170,20 +137,11 @@ final class MeshNetworkManager: NSObject, ObservableObject {
     
     private func sendToMesh(_ dict: [String: Any]) -> Bool {
         guard let data = try? JSONSerialization.data(withJSONObject: dict) else { return false }
-        do {
-            try session.send(data, toPeers: session.connectedPeers, with: .reliable)
-            return true
-        } catch { return false }
-    }
-    
-    private func ping() {
-        Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
-            self.webSocket?.sendPing { _ in }
-        }
+        do { try session.send(data, toPeers: session.connectedPeers, with: .reliable); return true }
+        catch { return false }
     }
 }
 
-// MARK: - MPC Delegates (Стандарт Apple)
 extension MeshNetworkManager: MCSessionDelegate, MCNearbyServiceAdvertiserDelegate, MCNearbyServiceBrowserDelegate {
     func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didReceiveInvitationFromPeer peerID: MCPeerID, withContext context: Data?, invitationHandler: @escaping (Bool, MCSession?) -> Void) { invitationHandler(true, session) }
     func browser(_ browser: MCNearbyServiceBrowser, foundPeer peerID: MCPeerID, withDiscoveryInfo info: [String : String]?) { browser.invitePeer(peerID, to: session, withContext: nil, timeout: 10) }
