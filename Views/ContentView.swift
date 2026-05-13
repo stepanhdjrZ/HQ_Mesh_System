@@ -9,19 +9,30 @@ struct ContentView: View {
         } else {
             TabView {
                 NavigationView {
-                    List(manager.contacts) { contact in
-                        NavigationLink(destination: ChatView(contact: contact)) {
-                            ContactRow(contact: contact)
+                    VStack(spacing: 0) {
+                        // Анонимный радар сверху
+                        RadarView(activeNodesCount: manager.nearbyNodes.count)
+                            .padding()
+                        
+                        Divider().background(Color.white.opacity(0.1))
+                        
+                        // Только твои закрытые ЛС-контакты
+                        List(manager.contacts) { contact in
+                            NavigationLink(destination: ChatView(contact: contact)) {
+                                ContactRow(contact: contact)
+                            }
                         }
+                        .listStyle(PlainListStyle())
                     }
-                    .navigationTitle("HQ Global")
+                    .navigationTitle("Защищенные ЛС")
+                    .background(AppConstants.UI.mainBackground.ignoresSafeArea())
                 }
-                .tabItem { Label("Сеть", systemImage: "bolt.fill") }
+                .tabItem { Label("Связь", systemImage: "lock.shield.fill") }
                 
                 NavigationView {
                     SettingsView()
                 }
-                .tabItem { Label("Штаб", systemImage: "cpu") }
+                .tabItem { Label("Узел", systemImage: "cpu") }
             }
             .accentColor(.cyan)
         }
