@@ -1,7 +1,7 @@
 name: HQGlobalMesh
 options:
   bundleIdPrefix: com.hq.global
-  xcodeVersion: "15.0" # 🎯 ВОТ ОНА, СЕРЕБРЯНАЯ ПУЛЯ!
+  xcodeVersion: "15.0"
 targets:
   HQGlobalMesh:
     type: application
