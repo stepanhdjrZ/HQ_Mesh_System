@@ -24,14 +24,12 @@ targets:
         CODE_SIGNING_ALLOWED: NO
         CODE_SIGNING_REQUIRED: NO
     dependencies:
-      - package: firebase-ios-sdk
-        product: FirebaseCore
-      - package: firebase-ios-sdk
+      - package: Firebase
         product: FirebaseAuth
-      - package: firebase-ios-sdk
+      - package: Firebase
         product: FirebaseFirestore
     
 packages:
-  firebase-ios-sdk:
+  Firebase:
     url: https://github.com/firebase/firebase-ios-sdk.git
     from: 10.0.0
