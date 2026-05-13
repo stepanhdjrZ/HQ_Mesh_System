@@ -2,87 +2,50 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject var manager: MeshNetworkManager
-    @State private var showQR = false
+    @State private var showScanner = false
     
     var body: some View {
-        ZStack {
-            Color(red: 0.01, green: 0.02, blue: 0.05).ignoresSafeArea()
-            
-            List {
-                // MARK: - Node Identity
-                Section {
-                    HStack(spacing: 20) {
-                        ZStack {
-                            Circle().fill(LinearGradient(colors: [.cyan, .blue], startPoint: .top, endPoint: .bottom))
-                                .frame(width: 80, height: 80)
-                            Text(String(manager.myNickname.prefix(1)).uppercased())
-                                .font(.system(size: 32, weight: .black)).foregroundColor(.black)
-                        }
-                        
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(manager.myNickname).font(.title2.bold()).foregroundColor(.white)
-                            Text(manager.myHQID).font(.system(size: 14, design: .monospaced)).foregroundColor(.cyan)
-                        }
-                        
-                        Spacer()
-                        
-                        Button(action: { showQR = true }) {
-                            Image(systemName: "qrcode").font(.title2).foregroundColor(.cyan)
-                        }
-                    }
-                    .padding(.vertical, 10)
-                    .listRowBackground(Color.white.opacity(0.05))
-                }
-                
-                // MARK: - Telemetry (Live Data)
-                Section(header: Text("АНАЛИТИКА ТРАФИКА").foregroundColor(.gray)) {
-                    MetricRow(label: "Передано по Mesh", value: "\(manager.statsSent) B", icon: "arrow.up.circle", color: .cyan)
-                    MetricRow(label: "Получено из эфира", value: "\(manager.statsReceived) B", icon: "arrow.down.circle", color: .blue)
-                    MetricRow(label: "Версия протокола", value: AppConstants.serviceType, icon: "cpu", color: .purple)
-                }
-                .listRowBackground(Color.white.opacity(0.05))
-                
-                // MARK: - Empire Management
-                Section(header: Text("УПРАВЛЕНИЕ УЗЛОМ").foregroundColor(.gray)) {
-                    SettingActionRow(label: "Очистить кэш сообщений", icon: "trash", color: .orange) {
-                        manager.messages.removeAll()
-                    }
+        List {
+            Section {
+                HStack(spacing: 15) {
+                    Circle().fill(Color.cyan).frame(width: 60, height: 60)
+                        .overlay(Text(String(manager.myNickname.prefix(1))).font(.title.bold()).foregroundColor(.black))
                     
-                    SettingActionRow(label: "Деактивировать и выйти", icon: "xmark.shield.fill", color: .red) {
-                        manager.destructSelfNode()
+                    VStack(alignment: .leading) {
+                        Text(manager.myNickname).font(.headline)
+                        Text(manager.myHQID).font(.caption).monospaced().foregroundColor(.gray)
                     }
                 }
-                .listRowBackground(Color.white.opacity(0.05))
+                .padding(.vertical, 8)
             }
-            .listStyle(InsetGroupedListStyle())
-            .scrollContentBackground(.hidden)
+            
+            Section("АНАЛИТИКА ТРАФИКА") {
+                HStack {
+                    Label("Передано", systemImage: "arrow.up.circle").foregroundColor(.cyan)
+                    Spacer()
+                    Text("\(manager.statsSent) B").monospaced()
+                }
+                HStack {
+                    Label("Получено", systemImage: "arrow.down.circle").foregroundColor(.blue)
+                    Spacer()
+                    Text("\(manager.statsReceived) B").monospaced()
+                }
+            }
+            
+            Section {
+                Button(action: { showScanner = true }) {
+                    Label("Сканировать новый узел", systemImage: "qrcode.viewfinder")
+                }
+                Button("Выйти из Империи", role: .destructive) {
+                    manager.logout()
+                }
+            }
         }
-        .navigationTitle("Штаб-квартира")
-        .sheet(isPresented: $showQR) {
-             // Здесь будет твой QRDetailView из прошлого пакета
-        }
-    }
-}
-
-struct MetricRow: View {
-    let label: String; let value: String; let icon: String; let color: Color
-    var body: some View {
-        HStack {
-            Image(systemName: icon).foregroundColor(color)
-            Text(label).foregroundColor(.white)
-            Spacer()
-            Text(value).font(.system(size: 14, design: .monospaced)).foregroundColor(.gray)
-        }
-    }
-}
-
-struct SettingActionRow: View {
-    let label: String; let icon: String; let color: Color; let action: () -> Void
-    var body: some View {
-        Button(action: action) {
-            HStack {
-                Image(systemName: icon).foregroundColor(color)
-                Text(label).foregroundColor(.white)
+        .navigationTitle("Штаб")
+        .sheet(isPresented: $showScanner) {
+            QRScannerView { code in
+                manager.handleExternalQR(code)
+                showScanner = false
             }
         }
     }
