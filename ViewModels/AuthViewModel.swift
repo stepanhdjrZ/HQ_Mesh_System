@@ -20,7 +20,7 @@ final class AuthViewModel: ObservableObject {
     }
     
     // Логика UI-состояний
-    func getHeaderTitle(step: MeshNetworkManager.MeshAuthStep) -> String {
+    func getHeaderTitle(step: MeshAuthStep) -> String {
         switch step {
         case .enterEmail: return "Вход в Империю"
         case .enterCode: return "Проверка туннеля"
@@ -28,7 +28,7 @@ final class AuthViewModel: ObservableObject {
         }
     }
     
-    func getHeaderSubtitle(step: MeshNetworkManager.MeshAuthStep) -> String {
+    func getHeaderSubtitle(step: MeshAuthStep) -> String {
         switch step {
         case .enterEmail: return "Введите вашу почту для получения ключа доступа."
         case .enterCode: return "Мы отправили секретный код. Введите его для синхронизации."
