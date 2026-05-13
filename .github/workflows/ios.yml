@@ -7,12 +7,11 @@ on:
 jobs:
   build:
     runs-on: macos-14
-
     steps:
     - uses: actions/checkout@v4
 
-    - name: Debug Paths
-      run: ls -R # Это покажет нам в логах, если какого-то файла не хватает
+    - name: Show File Structure
+      run: find . -maxdepth 2 -not -path '*/.*'
 
     - name: Install XcodeGen
       run: brew install xcodegen
@@ -20,12 +19,9 @@ jobs:
     - name: Generate Project
       run: xcodegen generate
 
-    - name: Select Xcode
-      run: sudo xcode-select -s /Applications/Xcode_15.4.app
-
-    - name: Clean Build
+    - name: Build
       run: |
-        xcodebuild clean build \
+        xcodebuild build \
           -project HQGlobalMesh.xcodeproj \
           -scheme HQGlobalMesh \
           -destination 'generic/platform=iOS' \
