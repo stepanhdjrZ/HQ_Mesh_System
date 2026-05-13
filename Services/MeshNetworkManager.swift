@@ -1,7 +1,7 @@
 import Foundation
 import MultipeerConnectivity
 import SwiftUI
-import UIKit // Необходим для вибрации UIImpactFeedbackGenerator
+import UIKit
 
 // MARK: - Models
 struct ChatMessage: Identifiable, Codable, Hashable {
@@ -25,12 +25,15 @@ struct Contact: Identifiable, Codable, Hashable {
     let lastMessageDate: Date
 }
 
-// MARK: - Manager
+// MARK: - Core System
 class MeshNetworkManager: NSObject, ObservableObject {
     @Published var connectionState: ConnectionState = .disconnected
     @Published var messages: [ChatMessage] = []
     @Published var contacts: [Contact] = []
     @Published var nearbyNodes: [String] = []
+    
+    // Блокировки (КРИТИЧНО ДЛЯ APP STORE)
+    @Published var blockedUsers: [String] = []
     
     @Published var myHQID: String = ""
     @Published var myUsername: String = ""
@@ -58,7 +61,7 @@ class MeshNetworkManager: NSObject, ObservableObject {
         if hasAccess { connectToCentralHQ() }
     }
 
-    // MARK: - Auth API
+    // MARK: - Server Auth
     func requestEmailCode(email: String) {
         isWaitingForServer = true
         sendWSMessage(["type": "request_code", "email": email])
@@ -74,9 +77,10 @@ class MeshNetworkManager: NSObject, ObservableObject {
         ])
     }
 
-    // MARK: - Network Logic
+    // MARK: - WebSocket Data Stream
     func connectToCentralHQ() {
         DispatchQueue.main.async { self.connectionState = .connecting }
+        // Твой сервер должен быть запущен для обработки этого
         guard let url = URL(string: "wss://elevation-strength-authentic.ngrok-free.dev/ws") else { return }
         
         var request = URLRequest(url: url)
@@ -110,20 +114,22 @@ class MeshNetworkManager: NSObject, ObservableObject {
         
         DispatchQueue.main.async {
             self.isWaitingForServer = false
-            
-            if type == "code_response" {
+            switch type {
+            case "code_response":
                 if json["success"] as? Bool == true { self.authStep = .enterCode }
-                else { self.authError = "Не удалось отправить письмо." }
-            } else if type == "auth_success" {
+                else { self.authError = "Сбой сервера. Письмо не отправлено." }
+            case "auth_success":
                 self.finalizeRegistration()
-            } else if type == "auth_error" {
-                self.authError = json["text"] as? String ?? "Ошибка авторизации"
-            } else if type == "msg" {
+            case "auth_error":
+                self.authError = json["text"] as? String ?? "Ошибка верификации"
+            case "msg":
                 self.handleIncomingMessage(json)
+            default: break
             }
         }
     }
 
+    // MARK: - Chat Logic & Apple Moderation
     func sendMessage(to targetID: String, text: String) {
         let payload: [String: Any] = ["type": "private_msg", "to_id": targetID, "text": text]
         sendWSMessage(payload)
@@ -139,12 +145,25 @@ class MeshNetworkManager: NSObject, ObservableObject {
 
     private func handleIncomingMessage(_ json: [String: Any]) {
         guard let senderId = json["from_id"] as? String, let msgText = json["text"] as? String else { return }
-        self.messages.append(ChatMessage(text: msgText, isMe: false, partnerId: senderId, timestamp: Date()))
         
+        // APPLE REQUIREMENT: Если юзер в блоке, игнорируем его сообщения
+        if blockedUsers.contains(senderId) { return }
+        
+        self.messages.append(ChatMessage(text: msgText, isMe: false, partnerId: senderId, timestamp: Date()))
         if !contacts.contains(where: { $0.hqId == senderId }) {
             contacts.append(Contact(hqId: senderId, name: "Node \(senderId.prefix(4))", lastMessageDate: Date()))
         }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+    
+    func blockUser(_ id: String) {
+        if !blockedUsers.contains(id) {
+            blockedUsers.append(id)
+            UserDefaults.standard.set(blockedUsers, forKey: "blockedUsers")
+            // Удаляем контакт из списка
+            contacts.removeAll { $0.hqId == id }
+            messages.removeAll { $0.partnerId == id }
+        }
     }
 
     private func sendWSMessage(_ dict: [String: Any]) {
@@ -153,6 +172,7 @@ class MeshNetworkManager: NSObject, ObservableObject {
         webSocket?.send(.string(string)) { _ in }
     }
 
+    // MARK: - Lifecycle
     private func finalizeRegistration() {
         self.hasAccess = true
         UserDefaults.standard.set(true, forKey: "isRegistered")
@@ -161,9 +181,11 @@ class MeshNetworkManager: NSObject, ObservableObject {
     }
 
     func deleteAccountRequest() {
-        ["isRegistered", "myHQID", "myUsername", "myNickname"].forEach { UserDefaults.standard.removeObject(forKey: $0) }
+        ["isRegistered", "myHQID", "myUsername", "myNickname", "blockedUsers"].forEach { UserDefaults.standard.removeObject(forKey: $0) }
         self.hasAccess = false
         self.authStep = .enterEmail
+        self.messages.removeAll()
+        self.contacts.removeAll()
         self.loadLocalData()
     }
 
@@ -175,6 +197,7 @@ class MeshNetworkManager: NSObject, ObservableObject {
         self.hasAccess = UserDefaults.standard.bool(forKey: "isRegistered")
         self.myUsername = UserDefaults.standard.string(forKey: "myUsername") ?? ""
         self.myNickname = UserDefaults.standard.string(forKey: "myNickname") ?? ""
+        self.blockedUsers = UserDefaults.standard.stringArray(forKey: "blockedUsers") ?? []
         
         if let savedID = UserDefaults.standard.string(forKey: "myHQID") {
             self.myHQID = savedID
@@ -185,7 +208,7 @@ class MeshNetworkManager: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - Mesh Core
+    // MARK: - Mesh Core (P2P Bluetooth/WiFi)
     private func setupMeshProtocol() {
         myPeerID = MCPeerID(displayName: myHQID)
         session = MCSession(peer: myPeerID, securityIdentity: nil, encryptionPreference: .required)
@@ -205,7 +228,9 @@ extension MeshNetworkManager: MCSessionDelegate, MCNearbyServiceAdvertiserDelega
     func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) { DispatchQueue.main.async { self.nearbyNodes = session.connectedPeers.map { $0.displayName } } }
     func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let text = json["text"] as? String else { return }
+        
         DispatchQueue.main.async {
+            if self.blockedUsers.contains(peerID.displayName) { return }
             self.messages.append(ChatMessage(text: text, isMe: false, partnerId: peerID.displayName, timestamp: Date()))
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
         }
