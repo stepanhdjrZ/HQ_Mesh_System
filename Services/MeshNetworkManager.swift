@@ -1,38 +1,45 @@
 import Foundation
 import MultipeerConnectivity
 import SwiftUI
-import UIKit // КРИТИЧНО ДЛЯ ВИБРАЦИИ И СИСТЕМНЫХ ФУНКЦИЙ
+import UIKit // Необходим для UI-отклика (вибрации)
 
-// Модели данных
-struct ChatMessage: Identifiable, Codable {
+// MARK: - Models
+struct ChatMessage: Identifiable, Codable, Hashable {
     var id = UUID()
     let text: String
     let isMe: Bool
     let partnerId: String
     let timestamp: Date
+    
     var timeString: String {
-        let formatter = DateFormatter(); formatter.dateFormat = "HH:mm"
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
         return formatter.string(from: timestamp)
     }
 }
 
-struct Contact: Identifiable, Codable {
+struct Contact: Identifiable, Codable, Hashable {
     var id = UUID()
     let hqId: String
     let name: String
     let lastMessageDate: Date
 }
 
+// MARK: - Main Manager
 class MeshNetworkManager: NSObject, ObservableObject {
+    // Shared State
     @Published var connectionState: ConnectionState = .disconnected
     @Published var messages: [ChatMessage] = []
     @Published var contacts: [Contact] = []
     @Published var nearbyNodes: [String] = []
+    
+    // User Profile
     @Published var myHQID: String = ""
     @Published var myUsername: String = ""
     @Published var myNickname: String = ""
     @Published var hasAccess = false
     
+    // Auth State
     @Published var authStep: AuthStep = .enterEmail
     @Published var isWaitingForServer = false
     @Published var authError = ""
@@ -40,8 +47,9 @@ class MeshNetworkManager: NSObject, ObservableObject {
     enum ConnectionState { case disconnected, connecting, connected, meshOnly }
     enum AuthStep { case enterEmail, enterCode, setupProfile }
     
+    // Private Network properties
     private var webSocket: URLSessionWebSocketTask?
-    private let serviceType = "hq-global-mesh"
+    private let serviceType = "hq-mesh-net"
     private var myPeerID: MCPeerID!
     private var session: MCSession!
     private var advertiser: MCNearbyServiceAdvertiser!
@@ -49,150 +57,191 @@ class MeshNetworkManager: NSObject, ObservableObject {
 
     override init() {
         super.init()
-        loadData()
-        setupMesh()
-        if hasAccess { connectToHQ() }
+        loadLocalData()
+        setupMeshProtocol()
+        if hasAccess { connectToCentralHQ() }
     }
 
+    // MARK: - Auth API
     func requestEmailCode(email: String) {
         isWaitingForServer = true
-        sendJSON(["type": "request_code", "email": email])
+        sendWSMessage(["type": "request_code", "email": email])
     }
     
     func registerUser(email: String, code: String, username: String, nickname: String) {
         isWaitingForServer = true
-        sendJSON([
+        sendWSMessage([
             "type": "verify_and_register",
-            "email": email, "code": code,
-            "username": username, "nickname": nickname,
+            "email": email,
+            "code": code,
+            "username": username,
+            "nickname": nickname,
             "hq_id": myHQID
         ])
     }
 
-    func connectToHQ() {
+    // MARK: - WebSocket Logic
+    func connectToCentralHQ() {
         DispatchQueue.main.async { self.connectionState = .connecting }
-        let url = URL(string: "wss://elevation-strength-authentic.ngrok-free.dev/ws")!
+        guard let url = URL(string: "wss://elevation-strength-authentic.ngrok-free.dev/ws") else { return }
+        
         var request = URLRequest(url: url)
         request.timeoutInterval = 10
         webSocket = URLSession.shared.webSocketTask(with: request)
         webSocket?.resume()
         
-        if hasAccess { sendJSON(["type": "register", "my_id": myHQID]) }
-        listenWS()
+        if hasAccess { sendWSMessage(["type": "register", "my_id": myHQID]) }
+        listenToWebSocket()
     }
 
-    private func listenWS() {
+    private func listenToWebSocket() {
         webSocket?.receive { [weak self] result in
+            guard let self = self else { return }
             switch result {
             case .success(let msg):
-                if case .string(let text) = msg { self?.handleServerResponse(text) }
-                self?.listenWS()
-                DispatchQueue.main.async { self?.connectionState = .connected }
+                if case .string(let text) = msg { self.processIncomingData(text) }
+                self.listenToWebSocket()
+                DispatchQueue.main.async { self.connectionState = .connected }
             case .failure:
-                DispatchQueue.main.async { self?.connectionState = .meshOnly }
-                self?.reconnect()
+                DispatchQueue.main.async { self.connectionState = .meshOnly }
+                self.scheduleReconnect()
             }
         }
     }
 
-    private func handleServerResponse(_ text: String) {
+    private func processIncomingData(_ text: String) {
         guard let data = text.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = json["type"] as? String else { return }
         
         DispatchQueue.main.async {
             self.isWaitingForServer = false
-            let type = json["type"] as? String
             
-            if type == "code_response" {
+            switch type {
+            case "code_response":
                 if json["success"] as? Bool == true { self.authStep = .enterCode }
-                else { self.authError = "Ошибка отправки письма." }
-            } 
-            else if type == "auth_success" {
-                self.hasAccess = true
-                UserDefaults.standard.set(true, forKey: "isRegistered")
-                UserDefaults.standard.set(self.myUsername, forKey: "myUsername")
-                UserDefaults.standard.set(self.myNickname, forKey: "myNickname")
+                else { self.authError = "Не удалось отправить письмо." }
+            case "auth_success":
+                self.finalizeRegistration()
+            case "auth_error":
+                self.authError = json["text"] as? String ?? "Ошибка авторизации"
+            case "msg":
+                self.handleIncomingMessage(json)
+            default: break
             }
-            else if type == "auth_error" { self.authError = json["text"] as? String ?? "Ошибка" }
-            else if type == "msg" { self.parseMessage(json) }
         }
     }
 
+    // MARK: - Messaging
     func sendMessage(to targetID: String, text: String) {
         let payload: [String: Any] = ["type": "private_msg", "to_id": targetID, "text": text]
-        sendJSON(payload)
         
+        // 1. Through Server
+        sendWSMessage(payload)
+        
+        // 2. Through Mesh
         if let data = try? JSONSerialization.data(withJSONObject: payload) {
             try? session.send(data, toPeers: session.connectedPeers, with: .reliable)
         }
+        
+        // 3. Update UI
         DispatchQueue.main.async {
             self.messages.append(ChatMessage(text: text, isMe: true, partnerId: targetID, timestamp: Date()))
         }
     }
 
-    private func sendJSON(_ dict: [String: Any]) {
-        if let data = try? JSONSerialization.data(withJSONObject: dict),
-           let string = String(data: data, encoding: .utf8) {
-            webSocket?.send(.string(string)) { _ in }
+    private func handleIncomingMessage(_ json: [String: Any]) {
+        guard let senderId = json["from_id"] as? String, let msgText = json["text"] as? String else { return }
+        self.messages.append(ChatMessage(text: msgText, isMe: false, partnerId: senderId, timestamp: Date()))
+        
+        if !contacts.contains(where: { $0.hqId == senderId }) {
+            contacts.append(Contact(hqId: senderId, name: "Node \(senderId.prefix(4))", lastMessageDate: Date()))
         }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 
-    private func setupMesh() {
-        myPeerID = MCPeerID(displayName: myHQID)
-        session = MCSession(peer: myPeerID, securityIdentity: nil, encryptionPreference: .required)
-        session.delegate = self
-        advertiser = MCNearbyServiceAdvertiser(peer: myPeerID, discoveryInfo: nil, serviceType: serviceType)
-        advertiser.delegate = self
-        advertiser.startAdvertisingPeer()
-        browser = MCNearbyServiceBrowser(peer: myPeerID, serviceType: serviceType)
-        browser.delegate = self
-        browser.startBrowsingForPeers()
+    private func sendWSMessage(_ dict: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: dict),
+              let string = String(data: data, encoding: .utf8) else { return }
+        webSocket?.send(.string(string)) { _ in }
     }
 
-    private func parseMessage(_ json: [String: Any]) {
-        if let senderId = json["from_id"] as? String, let msgText = json["text"] as? String {
-            self.messages.append(ChatMessage(text: msgText, isMe: false, partnerId: senderId, timestamp: Date()))
-            if !contacts.contains(where: { $0.hqId == senderId }) {
-                contacts.append(Contact(hqId: senderId, name: "Node \(senderId.prefix(4))", lastMessageDate: Date()))
-            }
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        }
+    // MARK: - Data Management
+    private func finalizeRegistration() {
+        self.hasAccess = true
+        UserDefaults.standard.set(true, forKey: "isRegistered")
+        UserDefaults.standard.set(self.myUsername, forKey: "myUsername")
+        UserDefaults.standard.set(self.myNickname, forKey: "myNickname")
     }
 
     func deleteAccountRequest() {
-        UserDefaults.standard.removeObject(forKey: "isRegistered")
-        UserDefaults.standard.removeObject(forKey: "myHQID")
+        let keys = ["isRegistered", "myHQID", "myUsername", "myNickname"]
+        keys.forEach { UserDefaults.standard.removeObject(forKey: $0) }
+        
         self.hasAccess = false
         self.authStep = .enterEmail
-        self.loadData()
+        self.loadLocalData()
     }
 
-    private func reconnect() {
-        DispatchQueue.global().asyncAfter(deadline: .now() + 5) { self.connectToHQ() }
+    private func scheduleReconnect() {
+        DispatchQueue.global().asyncAfter(deadline: .now() + 5) { [weak self] in self?.connectToCentralHQ() }
     }
     
-    private func loadData() {
+    private func loadLocalData() {
         self.hasAccess = UserDefaults.standard.bool(forKey: "isRegistered")
         self.myUsername = UserDefaults.standard.string(forKey: "myUsername") ?? ""
         self.myNickname = UserDefaults.standard.string(forKey: "myNickname") ?? ""
-        if let savedID = UserDefaults.standard.string(forKey: "myHQID") { self.myHQID = savedID }
-        else {
-            let newID = "HQ-\(UUID().uuidString.prefix(5))"
+        
+        if let savedID = UserDefaults.standard.string(forKey: "myHQID") {
+            self.myHQID = savedID
+        } else {
+            let newID = "HQ-\(UUID().uuidString.prefix(6))"
             UserDefaults.standard.set(newID, forKey: "myHQID")
             self.myHQID = newID
         }
     }
+
+    // MARK: - Mesh Core (Bluetooth/WiFi)
+    private func setupMeshProtocol() {
+        myPeerID = MCPeerID(displayName: myHQID)
+        session = MCSession(peer: myPeerID, securityIdentity: nil, encryptionPreference: .required)
+        session.delegate = self
+        
+        advertiser = MCNearbyServiceAdvertiser(peer: myPeerID, discoveryInfo: nil, serviceType: serviceType)
+        advertiser.delegate = self
+        advertiser.startAdvertisingPeer()
+        
+        browser = MCNearbyServiceBrowser(peer: myPeerID, serviceType: serviceType)
+        browser.delegate = self
+        browser.startBrowsingForPeers()
+    }
 }
 
+// MARK: - MCSessionDelegate
 extension MeshNetworkManager: MCSessionDelegate, MCNearbyServiceAdvertiserDelegate, MCNearbyServiceBrowserDelegate {
-    func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didReceiveInvitationFromPeer peerID: MCPeerID, withContext context: Data?, invitationHandler: @escaping (Bool, MCSession?) -> Void) { invitationHandler(true, session) }
-    func browser(_ browser: MCNearbyServiceBrowser, foundPeer peerID: MCPeerID, withDiscoveryInfo info: [String : String]?) { browser.invitePeer(peerID, to: session, withContext: nil, timeout: 10) }
-    func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) { DispatchQueue.main.async { self.nearbyNodes = session.connectedPeers.map { $0.displayName } } }
+    func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didReceiveInvitationFromPeer peerID: MCPeerID, withContext context: Data?, invitationHandler: @escaping (Bool, MCSession?) -> Void) {
+        invitationHandler(true, session)
+    }
+    
+    func browser(_ browser: MCNearbyServiceBrowser, foundPeer peerID: MCPeerID, withDiscoveryInfo info: [String : String]?) {
+        browser.invitePeer(peerID, to: session, withContext: nil, timeout: 10)
+    }
+    
+    func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) {
+        DispatchQueue.main.async { self.nearbyNodes = session.connectedPeers.map { $0.displayName } }
+    }
+    
     func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
-        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let text = json["text"] as? String {
-            DispatchQueue.main.async { self.messages.append(ChatMessage(text: text, isMe: false, partnerId: peerID.displayName, timestamp: Date())) }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let text = json["text"] as? String else { return }
+        
+        DispatchQueue.main.async {
+            self.messages.append(ChatMessage(text: text, isMe: false, partnerId: peerID.displayName, timestamp: Date()))
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
         }
     }
+    
+    // Required Stubs
     func session(_ session: MCSession, didReceive stream: InputStream, withName streamName: String, fromPeer peerID: MCPeerID) {}
     func session(_ session: MCSession, didStartReceivingResourceWithName resourceName: String, fromPeer peerID: MCPeerID, with progress: Progress) {}
     func session(_ session: MCSession, didFinishReceivingResourceWithName resourceName: String, fromPeer peerID: MCPeerID, at localURL: URL?, withError error: Error?) {}
