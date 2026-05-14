@@ -1,6 +1,6 @@
 import SwiftUI
 
-// 1. ИДЕАЛЬНЫЙ ФОН (Для ChatView и других экранов)
+// 1. ИДЕАЛЬНЫЙ ФОН
 struct HQBackground: View {
     var body: some View {
         ZStack {
@@ -16,9 +16,9 @@ struct HQBackground: View {
     }
 }
 
-// 2. КАРТОЧКА КОНТАКТА (Для ContentView)
+// 2. КАРТОЧКА КОНТАКТА
 struct ContactRow<T>: View {
-    var contact: T // Делаем универсальным, чтобы съел любую твою модель
+    var contact: T
     
     var body: some View {
         HStack(spacing: 15) {
@@ -32,7 +32,6 @@ struct ContactRow<T>: View {
             .frame(width: 45, height: 45)
             
             VStack(alignment: .leading, spacing: 4) {
-                // Универсальное чтение имени контакта
                 Text("УЗЕЛ ИМПЕРИИ") 
                     .font(.system(size: 14, weight: .bold, design: .monospaced))
                     .foregroundColor(.white)
@@ -50,11 +49,10 @@ struct ContactRow<T>: View {
     }
 }
 
-// 3. ПУЗЫРЬ ЧАТА TELEGRAM-STYLE (Для ChatView)
+// 3. ПУЗЫРЬ ЧАТА TELEGRAM-STYLE
 struct MessageBubble<T>: View {
     var message: T
     
-    // Используем магию Swift (Mirror), чтобы вытащить текст, не зная точной структуры твоей модели
     var body: some View {
         let mirror = Mirror(reflecting: message)
         let text = (mirror.children.first(where: { $0.label == "text" || $0.label == "content" })?.value as? String) ?? "Encrypted Payload..."
@@ -69,7 +67,6 @@ struct MessageBubble<T>: View {
                 .padding(.vertical, 10)
                 .background(isMe ? Color.cyan.opacity(0.2) : Color.white.opacity(0.1))
                 .foregroundColor(.white)
-                // Вот тот самый вызов закругления углов, который мы починили!
                 .cornerRadius(18, corners: isMe ? [.topLeft, .topRight, .bottomLeft] : [.topLeft, .topRight, .bottomRight])
                 .overlay(
                     RoundedCorner(radius: 18, corners: isMe ? [.topLeft, .topRight, .bottomLeft] : [.topLeft, .topRight, .bottomRight])
@@ -80,5 +77,45 @@ struct MessageBubble<T>: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
+    }
+}
+
+// 4. КИБЕР-РАДАР (Тот самый недостающий элемент!)
+struct RadarView: View {
+    var activeNodesCount: Int
+    @State private var isAnimating = false
+    
+    var body: some View {
+        ZStack {
+            // Внешнее пульсирующее кольцо
+            Circle()
+                .stroke(Color.cyan.opacity(0.3), lineWidth: 1)
+                .frame(width: 100, height: 100)
+                .scaleEffect(isAnimating ? 1.5 : 0.5)
+                .opacity(isAnimating ? 0 : 1)
+                .animation(Animation.easeInOut(duration: 2).repeatForever(autoreverses: false), value: isAnimating)
+            
+            // Внутреннее статичное кольцо
+            Circle()
+                .stroke(Color.cyan.opacity(0.5), lineWidth: 1)
+                .frame(width: 50, height: 50)
+            
+            // Центральное ядро
+            Circle()
+                .fill(Color.cyan)
+                .frame(width: 20, height: 20)
+                .shadow(color: .cyan, radius: 10, x: 0, y: 0)
+            
+            // Счетчик узлов внутри ядра (если они есть)
+            if activeNodesCount > 0 {
+                Text("\(activeNodesCount)")
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .foregroundColor(.black)
+            }
+        }
+        .frame(width: 150, height: 150)
+        .onAppear {
+            isAnimating = true
+        }
     }
 }
