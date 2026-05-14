@@ -2,6 +2,13 @@ import Foundation
 import SwiftUI
 import Combine
 
+// 🎯 ВОТ ОН, НАШ ПАСПОРТ, БЕЗ КОТОРОГО КОМПИЛЯТОР ПАДАЕТ В ОБМОРОК
+enum MeshAuthStep {
+    case enterEmail
+    case enterCode
+    case setupProfile
+}
+
 final class AuthViewModel: ObservableObject {
     @Published var email: String = ""
     @Published var code: String = ""
@@ -9,7 +16,7 @@ final class AuthViewModel: ObservableObject {
     @Published var nickname: String = ""
     @Published var acceptedEULA: Bool = false
     
-    // Продвинутая валидация
+    // Продвинутая валидация (Apple любит надежность)
     var isEmailValid: Bool {
         let emailRegEx = "[A-Z0-9a-z._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,64}"
         return NSPredicate(format:"SELF MATCHES %@", emailRegEx).evaluate(with: email)
