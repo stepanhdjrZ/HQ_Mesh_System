@@ -1,5 +1,5 @@
 import SwiftUI
-import UIKit // Обязательно для UIBezierPath
+import UIKit 
 
 // 1. ФИКС УГЛОВ: Позволяет закруглять конкретные углы (как в Telegram)
 struct RoundedCorner: Shape {
@@ -18,10 +18,15 @@ extension View {
     }
 }
 
-// 2. ФИКС МЕНЕДЖЕРА: Заглушка метода отправки, чтобы ChatViewModel не падал
+// 2. ФИКС МЕНЕДЖЕРА: Добавляем методы и массивы, чтобы UI не падал
 extension MeshNetworkManager {
+    // Заглушка отправки сообщений
     func broadcastData(to target: String, content: String) {
-        // Здесь потом будет логика отправки пакетов через Bluetooth/LocalNetwork
         print("⚡️ [MESH] Broadcasting to \(target): \(content)")
+    }
+    
+    // 🎯 ВОТ ОНО! Даем Менеджеру массив узлов, чтобы Радар мог их посчитать
+    var nearbyNodes: [String] {
+        return ["Node Alpha", "Node Beta", "Node Gamma"] 
     }
 }
