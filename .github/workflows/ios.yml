@@ -12,7 +12,6 @@ jobs:
 
     - name: Auto-Select Latest Xcode 🎯
       run: |
-        # Ищем все Xcodes, сортируем по версии и берем самый последний
         LATEST_XCODE=$(ls -d /Applications/Xcode*.app | sort -V | tail -n 1)
         echo "🔥 Найден новейший компилятор: $LATEST_XCODE"
         sudo xcode-select -s "$LATEST_XCODE"
@@ -25,10 +24,20 @@ jobs:
 
     - name: Build Application
       run: |
+        # Добавили -derivedDataPath build, чтобы точно знать, где лежит готовый файл
         xcodebuild build \
           -project HQGlobalMesh.xcodeproj \
           -scheme HQGlobalMesh \
           -destination 'generic/platform=iOS' \
           -configuration Debug \
+          -derivedDataPath build \
           CODE_SIGNING_ALLOWED=NO \
           CODE_SIGNING_REQUIRED=NO
+
+    - name: Upload Build Artifacts 📦
+      uses: actions/upload-artifact@v4
+      with:
+        name: HQ-Mesh-System-Debug-App
+        # Путь к собранному .app файлу внутри папки build
+        path: build/Build/Products/Debug-iphoneos/*.app
+        if-no-files-found: error
