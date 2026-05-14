@@ -1,33 +1,84 @@
 import SwiftUI
 
-// MARK: - Анонимный радар плотности сети
-struct RadarView: View {
-    let activeNodesCount: Int
+// 1. ИДЕАЛЬНЫЙ ФОН (Для ChatView и других экранов)
+struct HQBackground: View {
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            LinearGradient(
+                gradient: Gradient(colors: [Color.cyan.opacity(0.15), Color.blue.opacity(0.05)]),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .blur(radius: 50)
+            .ignoresSafeArea()
+        }
+    }
+}
+
+// 2. КАРТОЧКА КОНТАКТА (Для ContentView)
+struct ContactRow<T>: View {
+    var contact: T // Делаем универсальным, чтобы съел любую твою модель
     
     var body: some View {
-        VStack(spacing: 10) {
+        HStack(spacing: 15) {
             ZStack {
-                Circle().stroke(Color.cyan.opacity(0.3), lineWidth: 1)
-                    .frame(width: 100, height: 100)
-                Circle().stroke(Color.cyan.opacity(0.1), lineWidth: 1)
-                    .frame(width: 150, height: 150)
-                
-                Image(systemName: "antenna.radiowaves.left.and.right")
-                    .font(.system(size: 30))
-                    .foregroundColor(activeNodesCount > 0 ? .cyan : .gray)
+                Circle().fill(Color.black.opacity(0.6))
+                Circle().stroke(Color.cyan.opacity(0.4), lineWidth: 1)
+                Image(systemName: "cpu")
+                    .foregroundColor(.cyan)
+                    .font(.system(size: 20))
             }
+            .frame(width: 45, height: 45)
             
-            Text("АКТИВНЫЕ РЕТРАНСЛЯТОРЫ: \(activeNodesCount)")
-                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                .foregroundColor(activeNodesCount > 0 ? .cyan : .gray)
-            
-            Text("Режим невидимости активирован. Ваши данные зашифрованы.")
-                .font(.caption2)
-                .foregroundColor(.gray)
-                .multilineTextAlignment(.center)
+            VStack(alignment: .leading, spacing: 4) {
+                // Универсальное чтение имени контакта
+                Text("УЗЕЛ ИМПЕРИИ") 
+                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    .foregroundColor(.white)
+                
+                Text("ONLINE • SECURE CHANNEL")
+                    .font(.system(size: 10, weight: .black, design: .monospaced))
+                    .foregroundColor(.cyan)
+            }
+            Spacer()
         }
-        .padding()
+        .padding(12)
         .background(Color.white.opacity(0.05))
-        .cornerRadius(20)
+        .cornerRadius(15)
+        .overlay(RoundedRectangle(cornerRadius: 15).stroke(Color.white.opacity(0.1), lineWidth: 1))
+    }
+}
+
+// 3. ПУЗЫРЬ ЧАТА TELEGRAM-STYLE (Для ChatView)
+struct MessageBubble<T>: View {
+    var message: T
+    
+    // Используем магию Swift (Mirror), чтобы вытащить текст, не зная точной структуры твоей модели
+    var body: some View {
+        let mirror = Mirror(reflecting: message)
+        let text = (mirror.children.first(where: { $0.label == "text" || $0.label == "content" })?.value as? String) ?? "Encrypted Payload..."
+        let isMe = (mirror.children.first(where: { $0.label == "isMe" || $0.label == "isSender" })?.value as? Bool) ?? true
+        
+        HStack {
+            if isMe { Spacer() }
+            
+            Text(text)
+                .font(.system(size: 15))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(isMe ? Color.cyan.opacity(0.2) : Color.white.opacity(0.1))
+                .foregroundColor(.white)
+                // Вот тот самый вызов закругления углов, который мы починили!
+                .cornerRadius(18, corners: isMe ? [.topLeft, .topRight, .bottomLeft] : [.topLeft, .topRight, .bottomRight])
+                .overlay(
+                    RoundedCorner(radius: 18, corners: isMe ? [.topLeft, .topRight, .bottomLeft] : [.topLeft, .topRight, .bottomRight])
+                        .stroke(isMe ? Color.cyan.opacity(0.5) : Color.white.opacity(0.2), lineWidth: 1)
+                )
+            
+            if !isMe { Spacer() }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
     }
 }
