@@ -1,20 +1,24 @@
 import Foundation
 
-/// Системный регистратор событий HQ
-public final class LoggerService {
-    public enum EventType: String {
-        case info = "🔵 INFO"
-        case mesh = "🌐 MESH"
-        case cloud = "☁️ CLOUD"
-        case error = "🔴 ERROR"
-        case safety = "🛡 SAFETY"
-    }
-    
-    /// Запись события в системный лог
-    public static func log(_ message: String, type: EventType = .info) {
-        #if DEBUG
-        let timestamp = ISO8601DateFormatter().string(from: Date())
-        print("[\(timestamp)] [\(type.rawValue)] \(message)")
-        #endif
+enum LogLevel {
+    case info
+    case debug
+    case warning
+    case error
+    case security // 🎯 Тот самый уровень, который искал компилятор
+}
+
+final class LoggerService {
+    static func log(_ message: String, level: LogLevel = .info) {
+        let prefix: String
+        switch level {
+        case .info: prefix = "ℹ️ INFO"
+        case .debug: prefix = "🐛 DEBUG"
+        case .warning: prefix = "⚠️ WARNING"
+        case .error: prefix = "❌ ERROR"
+        case .security: prefix = "🛡 SECURITY"
+        }
+        
+        print("\(prefix) | \(message)")
     }
 }
