@@ -38,7 +38,7 @@ final class MeshNetworkManager: NSObject, ObservableObject {
         // Попытка разгрузить очередь при подключении
         queue.flush { packet in
             self.sendRaw(packet.payload, to: packet.recipient)
-            return true
+            // 🎯 Стерли "return true". Теперь здесь идеальный Void.
         }
     }
 
