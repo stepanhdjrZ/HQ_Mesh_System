@@ -1,5 +1,11 @@
 import Foundation
 
+// 🎯 ВОТ ОНО: Чертеж пакета, который требует MeshNetworkManager
+struct QueuedPacket {
+    let payload: String
+    let recipient: String
+}
+
 final class QueueManager {
     
     // Метод добавления в очередь
@@ -7,10 +13,12 @@ final class QueueManager {
         print("📦 [QUEUE] Пакет для узла \(recipient) успешно добавлен в очередь.")
     }
     
-    // 🎯 ВОТ ОНО! Разрешаем функции принимать блок кода, который просит Менеджер
-    func flush(_ completion: (Any) -> Void) {
+    // Теперь функция передает конкретный Пакет, а не "что-то непонятное"
+    func flush(_ completion: (QueuedPacket) -> Void) {
         print("🚀 [QUEUE] Очередь очищена. Пакеты ушли в эфир.")
-        // Имитируем передачу пакета, чтобы компилятор собрал цепь
-        completion("EncryptedPayload_0x99")
+        
+        // Отдаем тестовый пакет, чтобы компилятор собрал цепь
+        let dummyPacket = QueuedPacket(payload: "Encrypted_0x99", recipient: "HQ_Alpha")
+        completion(dummyPacket)
     }
 }
