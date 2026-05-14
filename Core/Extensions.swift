@@ -18,29 +18,20 @@ extension View {
     }
 }
 
-// 🎯 2. МОДЕЛЬ КОНТАКТА (Чтобы ContentView понимал, из чего состоит список)
-struct MeshContact: Identifiable {
-    let id = UUID()
-    let hqId: String
-}
-
-// 3. ФИКС МЕНЕДЖЕРА: Выдаем ему все недостающие списки
+// 2. ФИКС МЕНЕДЖЕРА: Выдаем ему все недостающие списки
 extension MeshNetworkManager {
     // Заглушка отправки сообщений
     func broadcastData(to target: String, content: String) {
         print("⚡️ [MESH] Broadcasting to \(target): \(content)")
     }
     
-    // Заглушка для Радара (Которую мы сделали ранее)
+    // Заглушка для Радара 
     var nearbyNodes: [String] {
         return ["Node Alpha", "Node Beta", "Node Gamma"] 
     }
     
-    // 🎯 ВОТ ОНО! Та самая "телефонная книга", которую требует ContentView на 20 строке
-    var contacts: [MeshContact] {
-        return [
-            MeshContact(hqId: "HQ-ALPHA-01"),
-            MeshContact(hqId: "HQ-BETA-02")
-        ]
+    // 🎯 ВОТ ОНО! Возвращаем пустой массив ТВОЕГО реального типа Contact
+    var contacts: [Contact] {
+        return []
     }
 }
