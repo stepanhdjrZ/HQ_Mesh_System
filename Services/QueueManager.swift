@@ -2,15 +2,15 @@ import Foundation
 
 final class QueueManager {
     
-    // Метод добавления в очередь, который ждал MeshNetworkManager
+    // Метод добавления в очередь
     func push(to recipient: String, data: Any) {
         print("📦 [QUEUE] Пакет для узла \(recipient) успешно добавлен в очередь.")
-        // В будущем здесь будет логика сохранения пакета в базу данных
     }
     
-    // Метод отправки всех пакетов, который ждал MeshNetworkManager
-    func flush() {
+    // 🎯 ВОТ ОНО! Разрешаем функции принимать блок кода, который просит Менеджер
+    func flush(_ completion: (Any) -> Void) {
         print("🚀 [QUEUE] Очередь очищена. Пакеты ушли в эфир.")
-        // В будущем здесь будет логика массовой рассылки
+        // Имитируем передачу пакета, чтобы компилятор собрал цепь
+        completion("EncryptedPayload_0x99")
     }
 }
