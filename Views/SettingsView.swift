@@ -1,52 +1,82 @@
 import SwiftUI
 
 struct SettingsView: View {
-    @EnvironmentObject var manager: MeshNetworkManager
-    @State private var showScanner = false
+    // Настоящие переменные, сохраняющиеся в памяти телефона
+    @AppStorage("isMeshEnabled") private var isMeshEnabled = true
+    @AppStorage("isStealthMode") private var isStealthMode = false
+    @AppStorage("allowBackgroundRouting") private var allowBackgroundRouting = true
+    @AppStorage("saveMediaToGallery") private var saveMediaToGallery = false
     
     var body: some View {
-        List {
-            Section {
-                HStack(spacing: 15) {
-                    Circle().fill(Color.cyan).frame(width: 60, height: 60)
-                        .overlay(Text(String(manager.myNickname.prefix(1))).font(.title.bold()).foregroundColor(.black))
+        NavigationView {
+            Form {
+                // ПРОФИЛЬ УЗЛА
+                Section(header: Text("Профиль узла")) {
+                    HStack {
+                        Image(systemName: "person.crop.circle.fill")
+                            .font(.system(size: 40))
+                            .foregroundColor(.cyan)
+                        VStack(alignment: .leading) {
+                            Text("Позывной: Emperor")
+                                .font(.headline)
+                            Text("ID: 8899-AABB-CCDD")
+                                .font(.caption)
+                                .foregroundColor(.gray)
+                        }
+                    }
+                    .padding(.vertical, 5)
+                }
+                
+                // MESH-СЕТЬ
+                Section(header: Text("Маршрутизация сети"), footer: Text("В скрытом режиме ваш узел передает транзитные пакеты, но не отображается на радарах других пользователей.")) {
+                    Toggle(isOn: $isMeshEnabled) {
+                        Label("Активный узел (Mesh)", systemImage: "antenna.radiowaves.left.and.right")
+                    }
+                    .tint(.cyan)
                     
-                    VStack(alignment: .leading) {
-                        Text(manager.myNickname).font(.headline)
-                        Text(manager.myHQID).font(.caption).monospaced().foregroundColor(.gray)
+                    Toggle(isOn: $allowBackgroundRouting) {
+                        Label("Фоновая ретрансляция", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .tint(.cyan)
+                    
+                    Toggle(isOn: $isStealthMode) {
+                        Label("Скрытый режим (Stealth)", systemImage: "eye.slash")
+                    }
+                    .tint(.cyan)
+                    .disabled(!isMeshEnabled)
+                }
+                
+                // ДАННЫЕ И ПАМЯТЬ
+                Section(header: Text("Данные и память")) {
+                    Toggle(isOn: $saveMediaToGallery) {
+                        Label("Сохранять фото в галерею", systemImage: "photo.on.rectangle")
+                    }
+                    
+                    Button(action: {
+                        // Логика очистки кэша
+                    }) {
+                        HStack {
+                            Text("Очистить кэш базы данных")
+                                .foregroundColor(.red)
+                            Spacer()
+                            Text("24 MB")
+                                .foregroundColor(.gray)
+                        }
                     }
                 }
-                .padding(.vertical, 8)
-            }
-            
-            Section("АНАЛИТИКА ТРАФИКА") {
-                HStack {
-                    Label("Передано", systemImage: "arrow.up.circle").foregroundColor(.cyan)
-                    Spacer()
-                    Text("\(manager.statsSent) B").monospaced()
-                }
-                HStack {
-                    Label("Получено", systemImage: "arrow.down.circle").foregroundColor(.blue)
-                    Spacer()
-                    Text("\(manager.statsReceived) B").monospaced()
+                
+                // ИНФОРМАЦИЯ (ДЛЯ APPLE)
+                Section(header: Text("Информация")) {
+                    NavigationLink(destination: Text("Здесь будет текст EULA...").padding()) {
+                        Text("Пользовательское соглашение (EULA)")
+                    }
+                    NavigationLink(destination: Text("Версия ядра Империи: 1.0.0").padding()) {
+                        Text("О приложении")
+                    }
                 }
             }
-            
-            Section {
-                Button(action: { showScanner = true }) {
-                    Label("Сканировать новый узел", systemImage: "qrcode.viewfinder")
-                }
-                Button("Выйти из Империи", role: .destructive) {
-                    manager.logout()
-                }
-            }
-        }
-        .navigationTitle("Штаб")
-        .sheet(isPresented: $showScanner) {
-            QRScannerView { code in
-                manager.handleExternalQR(code)
-                showScanner = false
-            }
+            .navigationTitle("Настройки")
+            .preferredColorScheme(.dark) 
         }
     }
 }
