@@ -8,12 +8,10 @@ struct HQApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                // Если статус auth - показываем новый экран с логином/паролем
                 if regManager.appState == .auth {
                     AuthView()
                         .environmentObject(regManager)
                 } else {
-                    // Иначе пускаем в саму Империю
                     MainAppContainer()
                         .environmentObject(meshManager)
                         .environmentObject(regManager)
