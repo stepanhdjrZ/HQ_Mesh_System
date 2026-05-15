@@ -24,7 +24,6 @@ jobs:
 
     - name: Build Application
       run: |
-        # Добавили -derivedDataPath build, чтобы точно знать, где лежит готовый файл
         xcodebuild build \
           -project HQGlobalMesh.xcodeproj \
           -scheme HQGlobalMesh \
@@ -34,10 +33,17 @@ jobs:
           CODE_SIGNING_ALLOWED=NO \
           CODE_SIGNING_REQUIRED=NO
 
-    - name: Upload Build Artifacts 📦
+    - name: Package to IPA 📦
+      run: |
+        # Робот сам создает правильную структуру для 3uTools
+        mkdir -p Payload
+        cp -r build/Build/Products/Debug-iphoneos/*.app Payload/
+        zip -qr HQ-Mesh-System.ipa Payload
+
+    - name: Upload Build Artifacts 🚀
       uses: actions/upload-artifact@v4
       with:
-        name: HQ-Mesh-System-Debug-App
-        # Путь к собранному .app файлу внутри папки build
-        path: build/Build/Products/Debug-iphoneos/*.app
+        name: HQ-Mesh-System-IPA
+        # Теперь Гитхаб отдаст тебе ровно один готовый файл
+        path: HQ-Mesh-System.ipa
         if-no-files-found: error
