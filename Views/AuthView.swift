@@ -19,6 +19,7 @@ struct AuthView: View {
             
             RadialGradient(gradient: Gradient(colors: [Color.cyan.opacity(0.15), .black]), center: .top, startRadius: 100, endRadius: 600)
                 .ignoresSafeArea()
+                .allowsHitTesting(false)
             
             VStack(spacing: 35) {
                 Spacer()
@@ -88,10 +89,10 @@ struct AuthView: View {
                     ProgressView()
                         .progressViewStyle(CircularProgressViewStyle(tint: .cyan))
                         .scaleEffect(1.5)
-                        .padding(.top, 10)
+18:53
+.padding(.top, 10)
                 } else {
-18:46
-Button(action: {
+                    Button(action: {
                         let impactMed = UIImpactFeedbackGenerator(style: .medium)
                         impactMed.impactOccurred() // Вибрация при нажатии
                         
@@ -121,6 +122,7 @@ Button(action: {
                     Button(action: {
                         withAnimation(.spring()) {
                             isLoginMode.toggle()
+                            regManager.errorMessage = nil
                         }
                     }) {
                         Text(isLoginMode ? "Новый участник? Присоединиться" : "Уже в Империи? Войти")
@@ -133,7 +135,6 @@ Button(action: {
                 Spacer()
             }
         }
-        // Защита от клавиатуры (экран будет красиво подниматься)
         .ignoresSafeArea(.keyboard)
     }
 }
